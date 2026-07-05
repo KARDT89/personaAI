@@ -16,8 +16,10 @@ import {
   PlusIcon,
   SendIcon,
   SettingsIcon,
+  ShieldIcon,
   SparklesIcon,
   Trash2Icon,
+  UserIcon,
   UploadIcon,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -62,6 +64,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/co
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Tooltip,
@@ -123,6 +126,14 @@ type SessionsResponse = {
   error?: string;
 };
 
+type AppConfigResponse = {
+  llm?: {
+    appApiKeyAvailable?: boolean;
+    defaultModel?: string;
+  };
+};
+
+type ApiKeyMode = "app" | "personal";
 type SourceType = "youtube-transcript" | "whatsapp-chat" | "other";
 type PersonaDialogMode = "create" | "edit";
 type PersonaDialogStep = "source" | "review";
@@ -145,6 +156,7 @@ const FALLBACK_PERSONAS: PersonaOption[] = [
 ];
 
 export function ChatWindow() {
+  const { data: authSession, refetch: refetchAuthSession } = authClient.useSession();
   const [personas, setPersonas] = useState<PersonaOption[]>(FALLBACK_PERSONAS);
   const [activePersona, setActivePersona] = useState("hitesh");
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -171,6 +183,10 @@ export function ChatWindow() {
   const [showProfileRail, setShowProfileRail] = useState(() =>
     readStoredSetting("persona-ai-show-profile-rail") !== "false",
   );
+  const [apiKeyMode, setApiKeyMode] = useState<ApiKeyMode>(() =>
+    readStoredSetting("persona-ai-api-key-mode") === "personal" ? "personal" : "app",
+  );
+  const [appApiKeyAvailable, setAppApiKeyAvailable] = useState(true);
   const [personalApiKey, setPersonalApiKey] = useState(
     () => readStoredSetting("persona-ai-openrouter-key") ?? "",
   );
@@ -192,6 +208,10 @@ export function ChatWindow() {
   }, [showProfileRail]);
 
   useEffect(() => {
+    localStorage.setItem("persona-ai-api-key-mode", apiKeyMode);
+  }, [apiKeyMode]);
+
+  useEffect(() => {
     if (personalApiKey.trim()) {
       localStorage.setItem("persona-ai-openrouter-key", personalApiKey.trim());
     } else {
@@ -202,6 +222,34 @@ export function ChatWindow() {
   useEffect(() => {
     localStorage.setItem("persona-ai-model", preferredModel.trim() || "openai/gpt-4o");
   }, [preferredModel]);
+
+  useEffect(() => {
+    async function loadAppConfig() {
+      try {
+        const response = await fetch("/api/app-config");
+        const data = (await response.json()) as AppConfigResponse;
+        const hasAppKey = Boolean(data.llm?.appApiKeyAvailable);
+
+        setAppApiKeyAvailable(hasAppKey);
+
+        if (data.llm?.defaultModel && !readStoredSetting("persona-ai-model")) {
+          setPreferredModel(data.llm.defaultModel);
+        }
+
+        if (!hasAppKey && apiKeyMode === "app") {
+          setApiKeyMode("personal");
+        }
+      } catch {
+        setAppApiKeyAvailable(false);
+
+        if (apiKeyMode === "app") {
+          setApiKeyMode("personal");
+        }
+      }
+    }
+
+    void loadAppConfig();
+  }, [apiKeyMode]);
 
   const loadSessions = useCallback(async () => {
     setIsLoadingSessions(true);
@@ -395,7 +443,7 @@ export function ChatWindow() {
           sessionId: nextSessionId,
           personaId: activePersona,
           message: nextMessage,
-          apiKey: personalApiKey.trim() || undefined,
+          apiKey: apiKeyMode === "personal" ? personalApiKey.trim() || undefined : undefined,
           model: preferredModel.trim() || undefined,
         }),
         signal: controller.signal,
@@ -769,15 +817,21 @@ export function ChatWindow() {
       </aside>
 
       <SettingsDialog
+        key={`${authSession?.user?.email ?? "user"}-${authSession?.user?.name ?? ""}`}
+        apiKeyMode={apiKeyMode}
+        appApiKeyAvailable={appApiKeyAvailable}
         compactMode={isCompactMode}
         model={preferredModel}
         open={isSettingsOpen}
         personalApiKey={personalApiKey}
         showProfileRail={showProfileRail}
+        user={authSession?.user ?? null}
+        onApiKeyModeChange={setApiKeyMode}
         onCompactModeChange={setIsCompactMode}
         onModelChange={setPreferredModel}
         onOpenChange={setIsSettingsOpen}
         onPersonalApiKeyChange={setPersonalApiKey}
+        onSessionRefresh={() => void refetchAuthSession()}
         onShowProfileRailChange={setShowProfileRail}
       />
 
@@ -1053,99 +1107,411 @@ function ChatHistoryRow({
 }
 
 function SettingsDialog({
+  apiKeyMode,
+  appApiKeyAvailable,
   compactMode,
   model,
+  onApiKeyModeChange,
   onCompactModeChange,
   onModelChange,
   onOpenChange,
   onPersonalApiKeyChange,
+  onSessionRefresh,
   onShowProfileRailChange,
   open,
   personalApiKey,
   showProfileRail,
+  user,
 }: {
+  apiKeyMode: ApiKeyMode;
+  appApiKeyAvailable: boolean;
   compactMode: boolean;
   model: string;
+  onApiKeyModeChange: (mode: ApiKeyMode) => void;
   onCompactModeChange: (enabled: boolean) => void;
   onModelChange: (model: string) => void;
   onOpenChange: (open: boolean) => void;
   onPersonalApiKeyChange: (apiKey: string) => void;
+  onSessionRefresh: () => void;
   onShowProfileRailChange: (enabled: boolean) => void;
   open: boolean;
   personalApiKey: string;
   showProfileRail: boolean;
+  user: { email?: string | null; name?: string | null } | null;
 }) {
+  const [displayName, setDisplayName] = useState(user?.name ?? "");
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [deletePassword, setDeletePassword] = useState("");
+  const [deleteConfirmation, setDeleteConfirmation] = useState("");
+  const [isSavingName, setIsSavingName] = useState(false);
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
+  const [isRevokingSessions, setIsRevokingSessions] = useState(false);
+  const [isDeletingAccount, setIsDeletingAccount] = useState(false);
+  const userEmail = user?.email ?? "";
+
+  async function handleUpdateName() {
+    const nextName = displayName.trim();
+
+    if (!nextName) {
+      toast.error("Enter a display name.");
+      return;
+    }
+
+    setIsSavingName(true);
+
+    try {
+      await authApiRequest("/api/auth/update-user", { name: nextName });
+      toast.success("Display name updated.");
+      onSessionRefresh();
+    } catch (caughtError) {
+      toast.error(getErrorMessage(caughtError));
+    } finally {
+      setIsSavingName(false);
+    }
+  }
+
+  async function handleChangePassword() {
+    if (!currentPassword || newPassword.length < 8) {
+      toast.error("Enter your current password and a new password with at least 8 characters.");
+      return;
+    }
+
+    setIsChangingPassword(true);
+
+    try {
+      await authApiRequest("/api/auth/change-password", {
+        currentPassword,
+        newPassword,
+        revokeOtherSessions: true,
+      });
+      setCurrentPassword("");
+      setNewPassword("");
+      toast.success("Password changed.");
+      onSessionRefresh();
+    } catch (caughtError) {
+      toast.error(getErrorMessage(caughtError));
+    } finally {
+      setIsChangingPassword(false);
+    }
+  }
+
+  async function handleRevokeSessions() {
+    setIsRevokingSessions(true);
+
+    try {
+      await authApiRequest("/api/auth/revoke-sessions", {});
+      clearLocalSettings();
+      window.location.href = "/";
+    } catch (caughtError) {
+      toast.error(getErrorMessage(caughtError));
+      setIsRevokingSessions(false);
+    }
+  }
+
+  async function handleDeleteAccount() {
+    if (deleteConfirmation.trim().toLowerCase() !== userEmail.toLowerCase()) {
+      toast.error("Type your email address to confirm account deletion.");
+      return;
+    }
+
+    if (!deletePassword) {
+      toast.error("Enter your password to delete your account.");
+      return;
+    }
+
+    setIsDeletingAccount(true);
+
+    try {
+      await authApiRequest("/api/auth/delete-user", {
+        callbackURL: "/",
+        password: deletePassword,
+      });
+      clearLocalSettings();
+      window.location.href = "/";
+    } catch (caughtError) {
+      toast.error(getErrorMessage(caughtError));
+      setIsDeletingAccount(false);
+    }
+  }
+
+  const canDeleteAccount =
+    Boolean(userEmail) &&
+    deleteConfirmation.trim().toLowerCase() === userEmail.toLowerCase() &&
+    Boolean(deletePassword);
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="flex max-h-[92dvh] flex-col overflow-hidden p-0 sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Settings</DialogTitle>
-          <DialogDescription>
-            Tune the chat layout and use your own OpenRouter credentials for messages.
-          </DialogDescription>
+          <div className="border-b p-6 pb-4">
+            <DialogTitle>Settings</DialogTitle>
+            <DialogDescription>
+              Manage your account, API key source, and interface preferences.
+            </DialogDescription>
+          </div>
         </DialogHeader>
 
-        <div className="grid gap-5">
-          <div className="grid gap-3 rounded-lg border p-3">
-            <div className="flex items-center gap-2 text-sm font-medium">
-              <PanelRightIcon className="size-4 text-muted-foreground" />
-              Interface
-            </div>
-            <SettingSwitch
-              checked={compactMode}
-              description="Reduce vertical spacing in the conversation."
-              label="Compact Chat"
-              onCheckedChange={onCompactModeChange}
-            />
-            <SettingSwitch
-              checked={showProfileRail}
-              description="Show the persona profile panel on wide screens."
-              label="Profile Rail"
-              onCheckedChange={onShowProfileRailChange}
-            />
+        <Tabs defaultValue="account" className="flex min-h-0 flex-1 flex-col">
+          <div className="border-b px-6 py-3">
+            <TabsList className="grid w-full grid-cols-3">
+              <TabsTrigger value="account">Account</TabsTrigger>
+              <TabsTrigger value="ai">AI & API Key</TabsTrigger>
+              <TabsTrigger value="interface">Interface</TabsTrigger>
+            </TabsList>
           </div>
 
-          <div className="grid gap-3 rounded-lg border p-3">
-            <div className="flex items-center gap-2 text-sm font-medium">
-              <KeyRoundIcon className="size-4 text-muted-foreground" />
-              OpenRouter
-            </div>
-            <div className="grid gap-1.5">
-              <Label htmlFor="settings-openrouter-key">API Key</Label>
-              <Input
-                id="settings-openrouter-key"
-                name="openrouter-api-key"
-                type="password"
-                autoComplete="off"
-                value={personalApiKey}
-                onChange={(event) => onPersonalApiKeyChange(event.target.value)}
-                placeholder="sk-or-…"
-              />
-              <p className="text-xs text-muted-foreground">
-                Stored in this browser and sent only with chat requests.
-              </p>
-            </div>
-            <div className="grid gap-1.5">
-              <Label htmlFor="settings-openrouter-model">Model</Label>
-              <Input
-                id="settings-openrouter-model"
-                name="openrouter-model"
-                autoComplete="off"
-                value={model}
-                onChange={(event) => onModelChange(event.target.value)}
-                placeholder="openai/gpt-4o"
-              />
-            </div>
-          </div>
-        </div>
+          <div className="min-h-0 flex-1 overflow-y-auto p-6">
+            <TabsContent value="account" className="mt-0 grid gap-5">
+              <section className="grid gap-3 rounded-lg border p-4">
+                <div className="flex items-center gap-2 text-sm font-medium">
+                  <UserIcon className="size-4 text-muted-foreground" />
+                  Profile
+                </div>
+                <div className="grid gap-1.5">
+                  <Label htmlFor="settings-email">Email</Label>
+                  <Input
+                    id="settings-email"
+                    name="email"
+                    type="email"
+                    value={userEmail}
+                    readOnly
+                    spellCheck={false}
+                  />
+                </div>
+                <div className="grid gap-1.5">
+                  <Label htmlFor="settings-display-name">Display Name</Label>
+                  <Input
+                    id="settings-display-name"
+                    name="display-name"
+                    autoComplete="name"
+                    value={displayName}
+                    onChange={(event) => setDisplayName(event.target.value)}
+                  />
+                </div>
+                <Button
+                  type="button"
+                  className="w-fit"
+                  disabled={isSavingName || !displayName.trim()}
+                  onClick={() => void handleUpdateName()}
+                >
+                  {isSavingName ? <Spinner /> : <UserIcon />}
+                  Save Profile
+                </Button>
+              </section>
 
-        <DialogFooter>
-          <Button type="button" onClick={() => onOpenChange(false)}>
-            Done
-          </Button>
-        </DialogFooter>
+              <section className="grid gap-3 rounded-lg border p-4">
+                <div className="flex items-center gap-2 text-sm font-medium">
+                  <ShieldIcon className="size-4 text-muted-foreground" />
+                  Security
+                </div>
+                <div className="grid gap-1.5">
+                  <Label htmlFor="settings-current-password">Current Password</Label>
+                  <Input
+                    id="settings-current-password"
+                    name="current-password"
+                    type="password"
+                    autoComplete="current-password"
+                    value={currentPassword}
+                    onChange={(event) => setCurrentPassword(event.target.value)}
+                  />
+                </div>
+                <div className="grid gap-1.5">
+                  <Label htmlFor="settings-new-password">New Password</Label>
+                  <Input
+                    id="settings-new-password"
+                    name="new-password"
+                    type="password"
+                    autoComplete="new-password"
+                    minLength={8}
+                    value={newPassword}
+                    onChange={(event) => setNewPassword(event.target.value)}
+                  />
+                </div>
+                <Button
+                  type="button"
+                  className="w-fit"
+                  disabled={isChangingPassword}
+                  onClick={() => void handleChangePassword()}
+                >
+                  {isChangingPassword ? <Spinner /> : <ShieldIcon />}
+                  Change Password
+                </Button>
+              </section>
+
+              <section className="grid gap-3 rounded-lg border border-destructive/30 p-4">
+                <div className="flex items-center gap-2 text-sm font-medium text-destructive">
+                  <Trash2Icon className="size-4" />
+                  Danger Zone
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={isRevokingSessions}
+                    onClick={() => void handleRevokeSessions()}
+                  >
+                    {isRevokingSessions ? <Spinner /> : <LogOutIcon />}
+                    Sign Out All Sessions
+                  </Button>
+                </div>
+                <div className="grid gap-1.5">
+                  <Label htmlFor="settings-delete-confirmation">Type Your Email</Label>
+                  <Input
+                    id="settings-delete-confirmation"
+                    name="delete-confirmation"
+                    autoComplete="off"
+                    value={deleteConfirmation}
+                    onChange={(event) => setDeleteConfirmation(event.target.value)}
+                    placeholder={userEmail || "you@example.com"}
+                  />
+                </div>
+                <div className="grid gap-1.5">
+                  <Label htmlFor="settings-delete-password">Password</Label>
+                  <Input
+                    id="settings-delete-password"
+                    name="delete-password"
+                    type="password"
+                    autoComplete="current-password"
+                    value={deletePassword}
+                    onChange={(event) => setDeletePassword(event.target.value)}
+                  />
+                </div>
+                <Button
+                  type="button"
+                  variant="destructive"
+                  className="w-fit"
+                  disabled={!canDeleteAccount || isDeletingAccount}
+                  onClick={() => void handleDeleteAccount()}
+                >
+                  {isDeletingAccount ? <Spinner /> : <Trash2Icon />}
+                  Delete Account
+                </Button>
+              </section>
+            </TabsContent>
+
+            <TabsContent value="ai" className="mt-0 grid gap-5">
+              <section className="grid gap-3 rounded-lg border p-4">
+                <div className="flex items-center gap-2 text-sm font-medium">
+                  <KeyRoundIcon className="size-4 text-muted-foreground" />
+                  API Key Source
+                </div>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <ApiModeButton
+                    active={apiKeyMode === "app"}
+                    description={
+                      appApiKeyAvailable
+                        ? "Use the app's API key. Paid-plan controls can be added later."
+                        : "App API key is not configured. Add your own key to chat."
+                    }
+                    disabled={!appApiKeyAvailable}
+                    label="Use App API Key"
+                    onClick={() => onApiKeyModeChange("app")}
+                  />
+                  <ApiModeButton
+                    active={apiKeyMode === "personal"}
+                    description="Use a browser-only OpenRouter key for your chats."
+                    label="Use My API Key"
+                    onClick={() => onApiKeyModeChange("personal")}
+                  />
+                </div>
+              </section>
+
+              <section className="grid gap-3 rounded-lg border p-4">
+                <div className="grid gap-1.5">
+                  <Label htmlFor="settings-openrouter-key">Personal API Key</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      id="settings-openrouter-key"
+                      name="openrouter-api-key"
+                      type="password"
+                      autoComplete="off"
+                      value={personalApiKey}
+                      onChange={(event) => onPersonalApiKeyChange(event.target.value)}
+                      placeholder="sk-or-…"
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={!personalApiKey}
+                      onClick={() => onPersonalApiKeyChange("")}
+                    >
+                      Clear Key
+                    </Button>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Stored in this browser and sent only when “Use My API Key” is selected.
+                  </p>
+                </div>
+                <div className="grid gap-1.5">
+                  <Label htmlFor="settings-openrouter-model">Model</Label>
+                  <Input
+                    id="settings-openrouter-model"
+                    name="openrouter-model"
+                    autoComplete="off"
+                    value={model}
+                    onChange={(event) => onModelChange(event.target.value)}
+                    placeholder="openai/gpt-4o"
+                  />
+                </div>
+              </section>
+            </TabsContent>
+
+            <TabsContent value="interface" className="mt-0 grid gap-5">
+              <section className="grid gap-3 rounded-lg border p-4">
+                <div className="flex items-center gap-2 text-sm font-medium">
+                  <PanelRightIcon className="size-4 text-muted-foreground" />
+                  Interface
+                </div>
+                <SettingSwitch
+                  checked={compactMode}
+                  description="Reduce vertical spacing in the conversation."
+                  label="Compact Chat"
+                  onCheckedChange={onCompactModeChange}
+                />
+                <SettingSwitch
+                  checked={showProfileRail}
+                  description="Show the persona profile panel on wide screens."
+                  label="Profile Rail"
+                  onCheckedChange={onShowProfileRailChange}
+                />
+              </section>
+            </TabsContent>
+          </div>
+        </Tabs>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function ApiModeButton({
+  active,
+  description,
+  disabled,
+  label,
+  onClick,
+}: {
+  active: boolean;
+  description: string;
+  disabled?: boolean;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      className={cn(
+        "min-h-28 rounded-lg border p-3 text-left transition hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60",
+        active && "border-primary bg-muted",
+      )}
+    >
+      <span className="block text-sm font-medium">{label}</span>
+      <span className="mt-2 block text-xs leading-5 text-muted-foreground">
+        {description}
+      </span>
+    </button>
   );
 }
 
@@ -1801,6 +2167,42 @@ async function readJsonError(response: Response) {
   } catch {
     return null;
   }
+}
+
+async function authApiRequest(path: string, body: Record<string, unknown>) {
+  const response = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    throw new Error(await readAuthError(response));
+  }
+
+  return response.json().catch(() => null);
+}
+
+async function readAuthError(response: Response) {
+  try {
+    const data = (await response.json()) as {
+      code?: string;
+      error?: string;
+      message?: string;
+    };
+
+    return data.message ?? data.error ?? data.code ?? "Request failed.";
+  } catch {
+    return "Request failed.";
+  }
+}
+
+function clearLocalSettings() {
+  localStorage.removeItem("persona-ai-api-key-mode");
+  localStorage.removeItem("persona-ai-openrouter-key");
+  localStorage.removeItem("persona-ai-model");
+  localStorage.removeItem("persona-ai-compact-mode");
+  localStorage.removeItem("persona-ai-show-profile-rail");
 }
 
 function getErrorMessage(error: unknown) {
