@@ -80,15 +80,15 @@ export function LandingHeroActions() {
   if (session?.user) {
     return (
       <div className="flex flex-col gap-3 sm:flex-row">
-        <Link href="/app" className={cn(buttonVariants({ size: "lg" }), "h-11")}>
-          Go to dashboard
-          <ArrowRightIcon />
-        </Link>
-        <Link
-          href="/app"
-          className={cn(buttonVariants({ variant: "outline", size: "lg" }), "h-11")}
-        >
-          Continue chatting
+      <Link href="/app" className={cn(buttonVariants({ size: "lg" }), "h-11")}>
+        Open app
+        <ArrowRightIcon />
+      </Link>
+      <Link
+        href="/app"
+        className={cn(buttonVariants({ variant: "outline", size: "lg" }), "h-11")}
+      >
+        Build study library
         </Link>
         <button
           type="button"
@@ -113,14 +113,14 @@ export function LandingHeroActions() {
   return (
     <div className="flex flex-col gap-3 sm:flex-row">
       <Link href="/app" className={cn(buttonVariants({ size: "lg" }), "h-11")}>
-        Create your persona
+        Open app
         <ArrowRightIcon />
       </Link>
       <Link
         href="/app"
         className={cn(buttonVariants({ variant: "outline", size: "lg" }), "h-11")}
       >
-        Try examples
+        Create persona
       </Link>
       <Link
         href={GITHUB_URL}

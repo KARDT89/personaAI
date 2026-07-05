@@ -258,6 +258,7 @@ export function ChatWindow() {
   const [isStartingSession, setIsStartingSession] = useState(true);
   const [isStreaming, setIsStreaming] = useState(false);
   const [isMobileLibraryOpen, setIsMobileLibraryOpen] = useState(false);
+  const [isMobileInspectorOpen, setIsMobileInspectorOpen] = useState(false);
   const [dialogMode, setDialogMode] = useState<PersonaDialogMode>("create");
   const [isPersonaDialogOpen, setIsPersonaDialogOpen] = useState(false);
   const [isLearningSourceDialogOpen, setIsLearningSourceDialogOpen] = useState(false);
@@ -290,12 +291,15 @@ export function ChatWindow() {
   );
   const didInitRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
+  const bottomRef = useRef<HTMLDivElement | null>(null);
 
   const currentPersona =
     personas.find((persona) => persona.id === activePersona) ?? personas[0] ?? FALLBACK_PERSONAS[0];
   const currentLearningSource =
     learningSources.find((source) => source.id === activeLearningSourceId) ?? learningSources[0] ?? null;
   const visibleMessages = activeMode === "learning" ? learningMessages : messages;
+  const latestVisibleMessage = visibleMessages.at(-1);
+  const latestVisibleMessageContent = latestVisibleMessage?.content ?? "";
 
   useEffect(() => {
     localStorage.setItem("persona-ai-compact-mode", String(isCompactMode));
@@ -308,6 +312,17 @@ export function ChatWindow() {
   useEffect(() => {
     localStorage.setItem("persona-ai-api-key-mode", apiKeyMode);
   }, [apiKeyMode]);
+
+  useEffect(() => {
+    if (!bottomRef.current) {
+      return;
+    }
+
+    bottomRef.current.scrollIntoView({
+      block: "end",
+      behavior: isStreaming ? "auto" : "smooth",
+    });
+  }, [isStartingSession, isStreaming, latestVisibleMessageContent, visibleMessages.length]);
 
   useEffect(() => {
     if (personalApiKey.trim()) {
@@ -1012,7 +1027,7 @@ export function ChatWindow() {
     <div
       className={cn(
         "grid h-dvh max-h-dvh overflow-hidden bg-muted/25 text-foreground lg:grid-cols-[18rem_minmax(0,1fr)]",
-        showProfileRail && "xl:grid-cols-[18rem_minmax(0,1fr)_17rem]",
+        showProfileRail && "xl:grid-cols-[18rem_minmax(0,1fr)_20rem]",
       )}
     >
       <aside className="hidden min-h-0 min-w-0 overflow-hidden border-r bg-sidebar/95 text-sidebar-foreground lg:block">
@@ -1191,6 +1206,66 @@ export function ChatWindow() {
               <PlusIcon />
               New chat
             </Button>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    type="button"
+                    variant={showProfileRail ? "secondary" : "ghost"}
+                    size="icon-sm"
+                    className="hidden xl:inline-flex"
+                    aria-label={showProfileRail ? "Close inspector" : "Open inspector"}
+                    onClick={() => setShowProfileRail(!showProfileRail)}
+                  />
+                }
+              >
+                <PanelRightIcon />
+              </TooltipTrigger>
+              <TooltipContent>{showProfileRail ? "Close inspector" : "Open inspector"}</TooltipContent>
+            </Tooltip>
+            <Sheet open={isMobileInspectorOpen} onOpenChange={setIsMobileInspectorOpen}>
+              <SheetTrigger render={<Button type="button" variant="ghost" size="icon-sm" className="xl:hidden" />}>
+                <PanelRightIcon />
+                <span className="sr-only">Open inspector</span>
+              </SheetTrigger>
+              <SheetContent side="right" className="w-[21rem] p-0">
+                <SheetHeader className="border-b">
+                  <SheetTitle>Context Inspector</SheetTitle>
+                </SheetHeader>
+                <ContextInspectorContent
+                  activeMode={activeMode}
+                  compactMode={isCompactMode}
+                  learningSessions={learningSessions}
+                  persona={currentPersona}
+                  source={currentLearningSource}
+                  onCompactModeChange={setIsCompactMode}
+                  onCreateLearningSource={() => {
+                    setIsMobileInspectorOpen(false);
+                    openLearningSourceDialog("book_pdf");
+                  }}
+                  onCreatePersona={() => {
+                    setIsMobileInspectorOpen(false);
+                    openCreatePersona();
+                  }}
+                  onDeleteLearningSource={(source) => {
+                    setIsMobileInspectorOpen(false);
+                    setLearningSourceBeingDeleted(source);
+                  }}
+                  onDeletePersona={(persona) => {
+                    setIsMobileInspectorOpen(false);
+                    setPersonaBeingDeleted(persona);
+                  }}
+                  onEditPersona={(persona) => {
+                    setIsMobileInspectorOpen(false);
+                    openEditPersona(persona);
+                  }}
+                  onPromptClick={(prompt) => {
+                    setIsMobileInspectorOpen(false);
+                    setInput(prompt);
+                  }}
+                />
+              </SheetContent>
+            </Sheet>
             <ThemeToggle />
             <Tooltip>
               <TooltipTrigger
@@ -1249,7 +1324,7 @@ export function ChatWindow() {
               <MessageScrollerViewport>
                 <MessageScrollerContent
                   className={cn(
-                    "mx-auto w-full max-w-3xl px-4",
+                    "mx-auto w-full max-w-4xl px-4 sm:px-6",
                     isCompactMode ? "gap-2 py-3" : "gap-4 py-6",
                   )}
                 >
@@ -1311,7 +1386,9 @@ export function ChatWindow() {
                       ))}
                     </MessageGroup>
                   )}
-                  <MessageScrollerItem scrollAnchor />
+                  <MessageScrollerItem scrollAnchor>
+                    <div ref={bottomRef} className="h-px" />
+                  </MessageScrollerItem>
                 </MessageScrollerContent>
                 <MessageScrollerButton />
               </MessageScrollerViewport>
@@ -1319,7 +1396,7 @@ export function ChatWindow() {
           </MessageScrollerProvider>
 
           <form onSubmit={handleSubmit} className="border-t bg-background/95 p-3 shadow-[0_-12px_30px_rgba(0,0,0,0.03)] backdrop-blur">
-            <div className="mx-auto flex max-w-3xl items-center gap-2 rounded-3xl border bg-background p-2 shadow-sm transition-shadow focus-within:shadow-lg focus-within:ring-3 focus-within:ring-ring/20">
+            <div className="mx-auto flex max-w-4xl items-center gap-2 rounded-3xl border bg-background p-2 shadow-sm transition-shadow focus-within:shadow-lg focus-within:ring-3 focus-within:ring-ring/20 sm:px-3">
               <Label htmlFor="chat-message" className="sr-only">
                 Message
               </Label>
@@ -1364,31 +1441,20 @@ export function ChatWindow() {
           !showProfileRail && "xl:hidden",
         )}
       >
-        {activeMode === "learning" ? (
-          <LearningDetails
-            compactMode={isCompactMode}
-            sessions={learningSessions}
-            showProfileRail={showProfileRail}
-            source={currentLearningSource}
-            onCompactModeChange={setIsCompactMode}
-            onCreate={() => openLearningSourceDialog("book_pdf")}
-            onDelete={setLearningSourceBeingDeleted}
-            onPromptClick={setInput}
-            onShowProfileRailChange={setShowProfileRail}
-          />
-        ) : (
-          <PersonaDetails
-            compactMode={isCompactMode}
-            persona={currentPersona}
-            showProfileRail={showProfileRail}
-            onCompactModeChange={setIsCompactMode}
-            onCreate={openCreatePersona}
-            onDelete={setPersonaBeingDeleted}
-            onEdit={openEditPersona}
-            onPromptClick={setInput}
-            onShowProfileRailChange={setShowProfileRail}
-          />
-        )}
+        <ContextInspectorContent
+          activeMode={activeMode}
+          compactMode={isCompactMode}
+          learningSessions={learningSessions}
+          persona={currentPersona}
+          source={currentLearningSource}
+          onCompactModeChange={setIsCompactMode}
+          onCreateLearningSource={() => openLearningSourceDialog("book_pdf")}
+          onCreatePersona={openCreatePersona}
+          onDeleteLearningSource={setLearningSourceBeingDeleted}
+          onDeletePersona={setPersonaBeingDeleted}
+          onEditPersona={openEditPersona}
+          onPromptClick={setInput}
+        />
       </aside>
 
       <SettingsDialog
@@ -1399,7 +1465,6 @@ export function ChatWindow() {
         model={preferredModel}
         open={isSettingsOpen}
         personalApiKey={personalApiKey}
-        showProfileRail={showProfileRail}
         user={authSession?.user ?? null}
         onApiKeyModeChange={setApiKeyMode}
         onCompactModeChange={setIsCompactMode}
@@ -1407,7 +1472,6 @@ export function ChatWindow() {
         onOpenChange={setIsSettingsOpen}
         onPersonalApiKeyChange={setPersonalApiKey}
         onSessionRefresh={() => void refetchAuthSession()}
-        onShowProfileRailChange={setShowProfileRail}
       />
 
       <PersonaEditorDialog
@@ -2028,10 +2092,8 @@ function SettingsDialog({
   onOpenChange,
   onPersonalApiKeyChange,
   onSessionRefresh,
-  onShowProfileRailChange,
   open,
   personalApiKey,
-  showProfileRail,
   user,
 }: {
   apiKeyMode: ApiKeyMode;
@@ -2044,10 +2106,8 @@ function SettingsDialog({
   onOpenChange: (open: boolean) => void;
   onPersonalApiKeyChange: (apiKey: string) => void;
   onSessionRefresh: () => void;
-  onShowProfileRailChange: (enabled: boolean) => void;
   open: boolean;
   personalApiKey: string;
-  showProfileRail: boolean;
   user: { email?: string | null; name?: string | null } | null;
 }) {
   const [displayName, setDisplayName] = useState(user?.name ?? "");
@@ -2380,12 +2440,9 @@ function SettingsDialog({
                   label="Compact Chat"
                   onCheckedChange={onCompactModeChange}
                 />
-                <SettingSwitch
-                  checked={showProfileRail}
-                  description="Show the persona profile panel on wide screens."
-                  label="Profile Rail"
-                  onCheckedChange={onShowProfileRailChange}
-                />
+                <div className="rounded-lg border bg-muted/30 p-3 text-xs leading-5 text-muted-foreground">
+                  Open the Context Inspector from the header to view persona details or source intelligence.
+                </div>
               </section>
             </TabsContent>
           </div>
@@ -2454,26 +2511,72 @@ function SettingSwitch({
   );
 }
 
+function ContextInspectorContent({
+  activeMode,
+  compactMode,
+  learningSessions,
+  persona,
+  source,
+  onCompactModeChange,
+  onCreateLearningSource,
+  onCreatePersona,
+  onDeleteLearningSource,
+  onDeletePersona,
+  onEditPersona,
+  onPromptClick,
+}: {
+  activeMode: AppMode;
+  compactMode: boolean;
+  learningSessions: LearningSessionSummary[];
+  persona: PersonaOption;
+  source: LearningSource | null;
+  onCompactModeChange: (enabled: boolean) => void;
+  onCreateLearningSource: () => void;
+  onCreatePersona: () => void;
+  onDeleteLearningSource: (source: LearningSource) => void;
+  onDeletePersona: (persona: PersonaOption) => void;
+  onEditPersona: (persona: PersonaOption) => void;
+  onPromptClick: (prompt: string) => void;
+}) {
+  return activeMode === "learning" ? (
+    <LearningDetails
+      compactMode={compactMode}
+      sessions={learningSessions}
+      source={source}
+      onCompactModeChange={onCompactModeChange}
+      onCreate={onCreateLearningSource}
+      onDelete={onDeleteLearningSource}
+      onPromptClick={onPromptClick}
+    />
+  ) : (
+    <PersonaDetails
+      compactMode={compactMode}
+      persona={persona}
+      onCompactModeChange={onCompactModeChange}
+      onCreate={onCreatePersona}
+      onDelete={onDeletePersona}
+      onEdit={onEditPersona}
+      onPromptClick={onPromptClick}
+    />
+  );
+}
+
 function PersonaDetails({
   compactMode,
   persona,
-  showProfileRail,
   onCompactModeChange,
   onCreate,
   onDelete,
   onEdit,
   onPromptClick,
-  onShowProfileRailChange,
 }: {
   compactMode: boolean;
   persona: PersonaOption;
-  showProfileRail: boolean;
   onCompactModeChange: (enabled: boolean) => void;
   onCreate: () => void;
   onDelete: (persona: PersonaOption) => void;
   onEdit: (persona: PersonaOption) => void;
   onPromptClick: (prompt: string) => void;
-  onShowProfileRailChange: (enabled: boolean) => void;
 }) {
   const prompts = persona.starterPrompts?.length
     ? persona.starterPrompts
@@ -2572,12 +2675,6 @@ function PersonaDetails({
               description="Reduce spacing between chat messages."
               label="Compact Chat"
               onCheckedChange={onCompactModeChange}
-            />
-            <SettingSwitch
-              checked={showProfileRail}
-              description="Keep this persona rail visible on wide screens."
-              label="Profile Rail"
-              onCheckedChange={onShowProfileRailChange}
             />
             <div className="grid gap-2 pt-2">
               {persona.isBuiltIn ? (
@@ -2795,23 +2892,19 @@ function CitationRow({ citations }: { citations: LearningCitation[] }) {
 function LearningDetails({
   compactMode,
   sessions,
-  showProfileRail,
   source,
   onCompactModeChange,
   onCreate,
   onDelete,
   onPromptClick,
-  onShowProfileRailChange,
 }: {
   compactMode: boolean;
   sessions: LearningSessionSummary[];
-  showProfileRail: boolean;
   source: LearningSource | null;
   onCompactModeChange: (enabled: boolean) => void;
   onCreate: () => void;
   onDelete: (source: LearningSource) => void;
   onPromptClick: (prompt: string) => void;
-  onShowProfileRailChange: (enabled: boolean) => void;
 }) {
   const sourceSessions = source
     ? sessions.filter((session) => session.sourceId === source.id).slice(0, 4)
@@ -2951,12 +3044,6 @@ function LearningDetails({
               description="Reduce spacing between chat messages."
               label="Compact Chat"
               onCheckedChange={onCompactModeChange}
-            />
-            <SettingSwitch
-              checked={showProfileRail}
-              description="Keep this source rail visible on wide screens."
-              label="Profile Rail"
-              onCheckedChange={onShowProfileRailChange}
             />
             {source ? (
               <Button type="button" variant="destructive" onClick={() => onDelete(source)}>
