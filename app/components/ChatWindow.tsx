@@ -577,6 +577,8 @@ export function ChatWindow() {
   }
 
   const canSend = Boolean(input.trim()) && !isStreaming && !isStartingSession;
+  const apiModeLabel = apiKeyMode === "personal" ? "Personal key" : "App key";
+  const sessionStateLabel = sessionId ? "Open chat" : "Draft";
 
   return (
     <div
@@ -602,7 +604,7 @@ export function ChatWindow() {
       </aside>
 
       <section className="flex min-h-0 min-w-0 flex-col overflow-hidden bg-background">
-        <header className="flex h-16 shrink-0 items-center justify-between gap-3 border-b bg-background/95 px-4 backdrop-blur">
+        <header className="flex min-h-16 shrink-0 items-center justify-between gap-3 border-b bg-background/95 px-4 py-2 backdrop-blur">
           <div className="flex min-w-0 items-center gap-3">
             <Sheet open={isMobileLibraryOpen} onOpenChange={setIsMobileLibraryOpen}>
               <SheetTrigger render={<Button variant="ghost" size="icon-sm" className="lg:hidden" />}>
@@ -652,14 +654,25 @@ export function ChatWindow() {
             </div>
           </div>
 
-          <div className="flex items-center gap-1.5">
-            <Badge variant="outline" className="hidden sm:inline-flex">
-              GPT-4o
-            </Badge>
+          <div className="flex min-w-0 items-center gap-2">
+            <div className="hidden min-w-0 items-center gap-1 rounded-2xl border bg-muted/40 px-2 py-1 text-xs text-muted-foreground md:flex">
+              <span
+                className={cn(
+                  "size-2 shrink-0 rounded-full",
+                  isStreaming ? "animate-soft-pulse bg-primary" : sessionId ? "bg-emerald-500" : "bg-amber-500",
+                )}
+              />
+              <span className="truncate">{isStreaming ? "Streaming" : sessionStateLabel}</span>
+              <span className="text-border">/</span>
+              <span className="truncate">{preferredModel || "openai/gpt-4o"}</span>
+              <span className="text-border">/</span>
+              <span className="truncate">{apiModeLabel}</span>
+            </div>
             <Button
               type="button"
               variant="outline"
               size="sm"
+              className="hidden sm:inline-flex"
               disabled={isStreaming || isStartingSession}
               onClick={() => startNewDraft(activePersona)}
             >
@@ -737,7 +750,7 @@ export function ChatWindow() {
                   ) : (
                     <MessageGroup className="flex w-full gap-4">
                       {messages.map((message) => (
-                        <MessageScrollerItem key={message.id}>
+                          <MessageScrollerItem key={message.id} className="animate-message-in">
                           <Message
                             align={message.role === "user" ? "end" : "start"}
                             className="min-w-0"
@@ -749,11 +762,12 @@ export function ChatWindow() {
                               <Bubble
                                 align={message.role === "user" ? "end" : "start"}
                                 variant={message.role === "user" ? "default" : "muted"}
+                                className="transition-transform duration-200 hover:-translate-y-0.5"
                               >
                                 <BubbleContent
                                   className={cn(
-                                    "min-w-0 max-w-full whitespace-pre-wrap break-words [overflow-wrap:anywhere]",
-                                    !message.content && "min-h-10 min-w-16",
+                                    "min-w-0 max-w-full whitespace-pre-wrap break-words shadow-sm transition-shadow duration-200 [overflow-wrap:anywhere] group-hover/message:shadow-md",
+                                    !message.content && "min-h-10 min-w-16 animate-soft-shimmer",
                                   )}
                                 >
                                   {message.content || (
@@ -774,8 +788,8 @@ export function ChatWindow() {
             </MessageScroller>
           </MessageScrollerProvider>
 
-          <form onSubmit={handleSubmit} className="border-t bg-background p-3">
-            <div className="mx-auto flex max-w-3xl items-end gap-2">
+          <form onSubmit={handleSubmit} className="border-t bg-background/95 p-3 shadow-[0_-12px_30px_rgba(0,0,0,0.03)] backdrop-blur">
+            <div className="mx-auto flex max-w-3xl items-end gap-2 rounded-3xl border bg-background p-2 shadow-sm transition-shadow focus-within:shadow-lg focus-within:ring-3 focus-within:ring-ring/20">
               <Label htmlFor="chat-message" className="sr-only">
                 Message
               </Label>
@@ -792,7 +806,7 @@ export function ChatWindow() {
                 }}
                 disabled={isStartingSession}
                 placeholder={`Message ${currentPersona.name}…`}
-                className="max-h-36 min-h-12 flex-1 bg-background shadow-sm"
+                className="max-h-36 min-h-12 flex-1 border-transparent bg-transparent shadow-none focus-visible:ring-0"
               />
               <Button type="submit" size="icon-lg" disabled={!canSend} aria-label="Send message">
                 {isStreaming ? <Spinner /> : <SendIcon />}
@@ -809,10 +823,15 @@ export function ChatWindow() {
         )}
       >
         <PersonaDetails
+          compactMode={isCompactMode}
           persona={currentPersona}
+          showProfileRail={showProfileRail}
+          onCompactModeChange={setIsCompactMode}
           onCreate={openCreatePersona}
           onDelete={setPersonaBeingDeleted}
           onEdit={openEditPersona}
+          onPromptClick={setInput}
+          onShowProfileRailChange={setShowProfileRail}
         />
       </aside>
 
@@ -1544,53 +1563,83 @@ function SettingSwitch({
 }
 
 function PersonaDetails({
+  compactMode,
   persona,
+  showProfileRail,
+  onCompactModeChange,
   onCreate,
   onDelete,
   onEdit,
+  onPromptClick,
+  onShowProfileRailChange,
 }: {
+  compactMode: boolean;
   persona: PersonaOption;
+  showProfileRail: boolean;
+  onCompactModeChange: (enabled: boolean) => void;
   onCreate: () => void;
   onDelete: (persona: PersonaOption) => void;
   onEdit: (persona: PersonaOption) => void;
+  onPromptClick: (prompt: string) => void;
+  onShowProfileRailChange: (enabled: boolean) => void;
 }) {
+  const prompts = persona.starterPrompts?.length
+    ? persona.starterPrompts
+    : [
+        "Give me a practical starter roadmap.",
+        "Review this idea and suggest improvements.",
+        "Explain your approach to learning this topic.",
+      ];
+
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      <div className="flex h-16 items-center justify-between border-b px-4">
-        <div className="text-sm font-semibold">Persona profile</div>
+    <div className="flex h-full min-h-0 flex-col bg-background/80">
+      <div className="flex h-16 shrink-0 items-center justify-between border-b px-4">
+        <div className="min-w-0">
+          <div className="truncate text-sm font-semibold">Persona</div>
+          <div className="truncate text-xs text-muted-foreground">{persona.name}</div>
+        </div>
         <Button type="button" variant="outline" size="sm" onClick={onCreate}>
           <PlusIcon />
           New
         </Button>
       </div>
-      <ScrollArea className="min-h-0 flex-1">
-        <div className="space-y-5 p-4">
-          <div className="flex items-center gap-3">
-            <PersonaAvatar persona={persona} size="lg" />
-            <div className="min-w-0">
-              <h2 className="truncate font-semibold">{persona.name}</h2>
-              <p className="text-sm text-muted-foreground">
-                {persona.tagline ?? "Custom chat persona"}
-              </p>
+
+      <Tabs defaultValue="profile" className="min-h-0 flex-1 gap-0">
+        <div className="border-b px-3 py-2">
+          <TabsList className="grid w-full grid-cols-3">
+            <TabsTrigger value="profile">Profile</TabsTrigger>
+            <TabsTrigger value="prompts">Prompts</TabsTrigger>
+            <TabsTrigger value="settings">Settings</TabsTrigger>
+          </TabsList>
+        </div>
+
+        <ScrollArea className="min-h-0 flex-1">
+          <TabsContent value="profile" className="animate-panel-in mt-0 space-y-5 p-4">
+            <div className="flex items-center gap-3">
+              <PersonaAvatar persona={persona} size="lg" />
+              <div className="min-w-0">
+                <h2 className="truncate font-semibold">{persona.name}</h2>
+                <p className="text-sm text-muted-foreground">
+                  {persona.tagline ?? "Custom chat persona"}
+                </p>
+              </div>
             </div>
-          </div>
-          <p className="text-sm leading-6 text-muted-foreground">
-            {persona.bio ?? "This persona is ready for a focused chat session."}
-          </p>
-          <div className="flex flex-wrap gap-2">
-            {(persona.topics?.length ? persona.topics : ["Conversation", "Style"]).map((topic) => (
-              <Badge key={topic} variant="outline">
-                {topic}
-              </Badge>
-            ))}
-          </div>
-          <div className="rounded-2xl border bg-background p-3 text-sm">
-            <div className="text-xs font-medium uppercase text-muted-foreground">
-              Source count
+            <p className="text-sm leading-6 text-muted-foreground">
+              {persona.bio ?? "This persona is ready for a focused chat session."}
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {(persona.topics?.length ? persona.topics : ["Conversation", "Style"]).map((topic) => (
+                <Badge key={topic} variant="outline">
+                  {topic}
+                </Badge>
+              ))}
             </div>
-            <div className="mt-1 font-medium">{persona.sourceCount ?? 0}</div>
-          </div>
-          <div className="grid gap-2">
+            <div className="rounded-lg border bg-background p-3 text-sm hover-lift">
+              <div className="text-xs font-medium uppercase text-muted-foreground">
+                Source count
+              </div>
+              <div className="mt-1 font-medium">{persona.sourceCount ?? 0}</div>
+            </div>
             {persona.isBuiltIn ? (
               <Alert>
                 <BotIcon />
@@ -1599,21 +1648,70 @@ function PersonaDetails({
                   Hitesh and Piyush are built-in examples. Create your own persona to edit or delete it.
                 </AlertDescription>
               </Alert>
-            ) : (
-              <>
-                <Button type="button" variant="outline" onClick={() => onEdit(persona)}>
-                  <PencilIcon />
-                  Edit or regenerate
+            ) : null}
+          </TabsContent>
+
+          <TabsContent value="prompts" className="animate-panel-in mt-0 space-y-4 p-4">
+            <div>
+              <h3 className="text-sm font-semibold">Starter prompts</h3>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                Click a prompt to place it in the composer.
+              </p>
+            </div>
+            <div className="grid gap-2">
+              {prompts.slice(0, 6).map((prompt) => (
+                <Button
+                  key={prompt}
+                  type="button"
+                  variant="outline"
+                  className="hover-lift h-auto justify-start whitespace-normal rounded-lg py-3 text-left text-wrap"
+                  onClick={() => onPromptClick(prompt)}
+                >
+                  <SparklesIcon />
+                  {prompt}
                 </Button>
-                <Button type="button" variant="destructive" onClick={() => onDelete(persona)}>
-                  <Trash2Icon />
-                  Delete persona
-                </Button>
-              </>
-            )}
-          </div>
-        </div>
-      </ScrollArea>
+              ))}
+            </div>
+          </TabsContent>
+
+          <TabsContent value="settings" className="animate-panel-in mt-0 space-y-4 p-4">
+            <SettingSwitch
+              checked={compactMode}
+              description="Reduce spacing between chat messages."
+              label="Compact Chat"
+              onCheckedChange={onCompactModeChange}
+            />
+            <SettingSwitch
+              checked={showProfileRail}
+              description="Keep this persona rail visible on wide screens."
+              label="Profile Rail"
+              onCheckedChange={onShowProfileRailChange}
+            />
+            <div className="grid gap-2 pt-2">
+              {persona.isBuiltIn ? (
+                <Alert>
+                  <BotIcon />
+                  <AlertTitle>Example persona</AlertTitle>
+                  <AlertDescription>
+                    Create your own persona to unlock edit and delete controls.
+                  </AlertDescription>
+                </Alert>
+              ) : (
+                <>
+                  <Button type="button" variant="outline" onClick={() => onEdit(persona)}>
+                    <PencilIcon />
+                    Edit or regenerate
+                  </Button>
+                  <Button type="button" variant="destructive" onClick={() => onDelete(persona)}>
+                    <Trash2Icon />
+                    Delete persona
+                  </Button>
+                </>
+              )}
+            </div>
+          </TabsContent>
+        </ScrollArea>
+      </Tabs>
     </div>
   );
 }

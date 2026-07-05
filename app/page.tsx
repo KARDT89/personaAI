@@ -1,7 +1,6 @@
 import Image from "next/image";
 import Link from "next/link";
 import {
-  ArrowRightIcon,
   FileTextIcon,
   LockKeyholeIcon,
   MessageSquareTextIcon,
@@ -11,7 +10,6 @@ import {
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
-import { buttonVariants } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -19,8 +17,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { cn } from "@/lib/utils";
 
+import { LandingHeaderActions, LandingHeroActions } from "./components/LandingActions";
 import { ThemeToggle } from "./components/ThemeToggle";
 
 const examples = [
@@ -39,7 +37,7 @@ const examples = [
 export default function LandingPage() {
   return (
     <main className="min-h-dvh bg-background text-foreground">
-      <header className="border-b bg-background/90">
+      <header className="border-b bg-background/90 backdrop-blur">
         <div className="mx-auto flex h-16 w-full max-w-6xl items-center justify-between px-4 sm:px-6">
           <Link href="/" className="flex items-center gap-2 font-semibold">
             <span className="flex size-8 items-center justify-center rounded-2xl bg-primary text-primary-foreground">
@@ -49,21 +47,12 @@ export default function LandingPage() {
           </Link>
           <div className="flex items-center gap-2">
             <ThemeToggle />
-            <Link
-              href="/app"
-              className={cn(buttonVariants({ variant: "outline" }), "hidden sm:inline-flex")}
-            >
-              Sign in
-            </Link>
-            <Link href="/app" className={buttonVariants()}>
-              Open app
-              <ArrowRightIcon />
-            </Link>
+            <LandingHeaderActions />
           </div>
         </div>
       </header>
 
-      <section className="mx-auto grid min-h-[calc(100dvh-4rem)] w-full max-w-6xl items-center gap-10 px-4 py-10 sm:px-6 lg:grid-cols-[1fr_0.86fr]">
+      <section className="mx-auto grid min-h-[calc(100dvh-8rem)] w-full max-w-6xl items-center gap-8 px-4 py-8 sm:gap-10 sm:px-6 sm:py-10 lg:grid-cols-[1fr_0.86fr]">
         <div className="space-y-7">
           <Badge variant="secondary" className="w-fit">
             Private persona builder for chat
@@ -77,18 +66,7 @@ export default function LandingPage() {
               personas from YouTube transcripts, WhatsApp exports, or pasted text.
             </p>
           </div>
-          <div className="flex flex-col gap-3 sm:flex-row">
-            <Link href="/app" className={cn(buttonVariants({ size: "lg" }), "h-11")}>
-              Create your persona
-              <ArrowRightIcon />
-            </Link>
-            <Link
-              href="/app"
-              className={cn(buttonVariants({ variant: "outline", size: "lg" }), "h-11")}
-            >
-              Try examples
-            </Link>
-          </div>
+          <LandingHeroActions />
 
           <div className="grid gap-3 pt-4 sm:grid-cols-3">
             {[
@@ -162,6 +140,9 @@ export default function LandingPage() {
           </CardContent>
         </Card>
       </section>
+      <footer className="border-t bg-background/90 px-4 py-5 text-center text-sm text-muted-foreground sm:px-6">
+        Made with ❤️ by DT89
+      </footer>
     </main>
   );
 }
