@@ -10,8 +10,14 @@ const personas = {
 export type PersonaId = keyof typeof personas;
 
 export type PersonaSummary = {
-  id: PersonaId;
+  id: string;
   name: string;
+  avatarUrl: string | null;
+  tagline: string | null;
+  bio: string | null;
+  topics: string[];
+  starterPrompts: string[];
+  isBuiltIn: boolean;
 };
 
 export function isPersonaId(value: unknown): value is PersonaId {
@@ -24,8 +30,14 @@ export function getPersonaData(personaId: PersonaId): PersonaData {
 
 export function getAvailablePersonas(): PersonaSummary[] {
   return Object.values(personas).map((persona) => ({
-    id: persona.persona_id as PersonaId,
+    id: persona.persona_id,
     name: persona.name,
+    avatarUrl: persona.avatar_url ?? null,
+    tagline: persona.tagline ?? null,
+    bio: persona.bio ?? persona.identity,
+    topics: persona.topics ?? [],
+    starterPrompts: persona.starter_prompts ?? [],
+    isBuiltIn: true,
   }));
 }
 
@@ -36,6 +48,14 @@ export function buildPersonaRecord(personaId: PersonaId) {
     id: persona.persona_id,
     name: persona.name,
     systemPrompt: buildSystemPrompt(persona),
+    ownerUserId: null,
+    isBuiltIn: true,
+    avatarUrl: persona.avatar_url ?? null,
+    tagline: persona.tagline ?? null,
+    bio: persona.bio ?? persona.identity,
+    topicsJson: persona.topics ?? [],
+    starterPromptsJson: persona.starter_prompts ?? [],
+    sourceCount: persona.source_count ?? 0,
   };
 }
 

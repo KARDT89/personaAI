@@ -17,7 +17,7 @@ const OPENROUTER_CHAT_COMPLETIONS_URL =
   "https://openrouter.ai/api/v1/chat/completions";
 
 export function getOpenRouterModel() {
-  return process.env.OPENROUTER_MODEL ?? "~openai/gpt-latest";
+  return process.env.OPENROUTER_MODEL ?? "openai/gpt-4o";
 }
 
 export async function createChatCompletion(request: ChatRequest) {

@@ -1,22 +1,48 @@
-import { index, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import {
+  boolean,
+  index,
+  integer,
+  jsonb,
+  pgTable,
+  text,
+  timestamp,
+  uuid,
+} from "drizzle-orm/pg-core";
+
+import { user } from "./auth-schema";
 
 export const personas = pgTable("personas", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   systemPrompt: text("system_prompt").notNull(),
+  ownerUserId: text("owner_user_id").references(() => user.id, {
+    onDelete: "cascade",
+  }),
+  isBuiltIn: boolean("is_built_in").default(false).notNull(),
+  avatarUrl: text("avatar_url"),
+  tagline: text("tagline"),
+  bio: text("bio"),
+  topicsJson: jsonb("topics_json").$type<string[]>().default([]),
+  starterPromptsJson: jsonb("starter_prompts_json").$type<string[]>().default([]),
+  sourceCount: integer("source_count").default(0).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
 });
 
 export const sessions = pgTable(
   "sessions",
   {
     id: uuid("id").defaultRandom().primaryKey(),
+    userId: text("user_id").references(() => user.id, { onDelete: "cascade" }),
     personaId: text("persona_id")
       .notNull()
       .references(() => personas.id),
     memorySummary: text("memory_summary"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   },
-  (table) => [index("sessions_persona_id_idx").on(table.personaId)],
+  (table) => [
+    index("sessions_persona_id_idx").on(table.personaId),
+    index("sessions_user_id_idx").on(table.userId),
+  ],
 );
 
 export const messages = pgTable(

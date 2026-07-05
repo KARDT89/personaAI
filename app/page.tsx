@@ -1,5 +1,10 @@
+import { AuthGate } from "./components/AuthGate";
 import { ChatWindow } from "./components/ChatWindow";
 
 export default function Home() {
-  return <ChatWindow />;
+  return (
+    <AuthGate>
+      <ChatWindow />
+    </AuthGate>
+  );
 }

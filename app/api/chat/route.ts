@@ -1,5 +1,6 @@
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, or } from "drizzle-orm";
 
+import { requireUser } from "@/lib/auth-utils";
 import { messages, personas, sessions } from "@/lib/db/schema";
 import {
   createChatCompletion,
@@ -11,6 +12,12 @@ const RECENT_MESSAGE_LIMIT = 12;
 const SUMMARY_TRIGGER_COUNT = 20;
 
 export async function POST(req: Request) {
+  const user = await requireUser(req);
+
+  if (!user) {
+    return Response.json({ error: "Unauthorized." }, { status: 401 });
+  }
+
   let body: unknown;
 
   try {
@@ -28,13 +35,13 @@ export async function POST(req: Request) {
     );
   }
 
-  const session = await getSession(input.sessionId, input.personaId);
+  const session = await getSession(input.sessionId, input.personaId, user.id);
 
   if (!session) {
     return Response.json({ error: "Session not found." }, { status: 404 });
   }
 
-  const persona = await getPersona(input.personaId);
+  const persona = await getPersona(input.personaId, user.id);
 
   if (!persona) {
     return Response.json({ error: "Persona not found." }, { status: 404 });
@@ -114,23 +121,34 @@ function parseChatRequest(body: unknown) {
   };
 }
 
-async function getSession(sessionId: string, personaId: string) {
+async function getSession(sessionId: string, personaId: string, userId: string) {
   const { db } = await import("@/lib/db");
   const [session] = await db
     .select()
     .from(sessions)
-    .where(and(eq(sessions.id, sessionId), eq(sessions.personaId, personaId)))
+    .where(
+      and(
+        eq(sessions.id, sessionId),
+        eq(sessions.personaId, personaId),
+        eq(sessions.userId, userId),
+      ),
+    )
     .limit(1);
 
   return session;
 }
 
-async function getPersona(personaId: string) {
+async function getPersona(personaId: string, userId: string) {
   const { db } = await import("@/lib/db");
   const [persona] = await db
     .select()
     .from(personas)
-    .where(eq(personas.id, personaId))
+    .where(
+      and(
+        eq(personas.id, personaId),
+        or(eq(personas.isBuiltIn, true), eq(personas.ownerUserId, userId)),
+      ),
+    )
     .limit(1);
 
   return persona;

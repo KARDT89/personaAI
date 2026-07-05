@@ -4,9 +4,13 @@ import { db, pool, schema } from "@/lib/db/client";
 import { buildPersonaRecord, getAvailablePersonas } from "@/lib/personas";
 
 async function main() {
-  const records = getAvailablePersonas().map((persona) =>
-    buildPersonaRecord(persona.id),
-  );
+  const records = getAvailablePersonas().map((persona) => {
+    if (persona.id !== "hitesh" && persona.id !== "piyush") {
+      throw new Error(`Cannot seed unknown built-in persona ${persona.id}.`);
+    }
+
+    return buildPersonaRecord(persona.id);
+  });
 
   for (const record of records) {
     await db
@@ -17,6 +21,14 @@ async function main() {
         set: {
           name: record.name,
           systemPrompt: record.systemPrompt,
+          ownerUserId: record.ownerUserId,
+          isBuiltIn: record.isBuiltIn,
+          avatarUrl: record.avatarUrl,
+          tagline: record.tagline,
+          bio: record.bio,
+          topicsJson: record.topicsJson,
+          starterPromptsJson: record.starterPromptsJson,
+          sourceCount: record.sourceCount,
         },
       });
   }

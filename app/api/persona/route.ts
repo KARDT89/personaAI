@@ -1,13 +1,35 @@
-import { sessions } from "@/lib/db/schema";
-import { getAvailablePersonas, isPersonaId } from "@/lib/personas";
+import { and, asc, eq, or } from "drizzle-orm";
 
-export async function GET() {
+import { requireUser } from "@/lib/auth-utils";
+import { sessions } from "@/lib/db/schema";
+import { personas } from "@/lib/db/schema";
+
+export async function GET(req: Request) {
+  const user = await requireUser(req);
+
+  if (!user) {
+    return Response.json({ error: "Unauthorized." }, { status: 401 });
+  }
+
+  const { db } = await import("@/lib/db");
+  const rows = await db
+    .select()
+    .from(personas)
+    .where(or(eq(personas.isBuiltIn, true), eq(personas.ownerUserId, user.id)))
+    .orderBy(asc(personas.isBuiltIn), asc(personas.name));
+
   return Response.json({
-    personas: getAvailablePersonas(),
+    personas: rows.map(toPersonaSummary),
   });
 }
 
 export async function POST(req: Request) {
+  const user = await requireUser(req);
+
+  if (!user) {
+    return Response.json({ error: "Unauthorized." }, { status: 401 });
+  }
+
   let body: unknown;
 
   try {
@@ -21,20 +43,46 @@ export async function POST(req: Request) {
       ? body.personaId
       : undefined;
 
-  if (!isPersonaId(personaId)) {
+  if (typeof personaId !== "string") {
     return Response.json({ error: "Invalid personaId." }, { status: 400 });
   }
 
   const { db } = await import("@/lib/db");
+  const [persona] = await db
+    .select()
+    .from(personas)
+    .where(
+      and(
+        eq(personas.id, personaId),
+        or(eq(personas.isBuiltIn, true), eq(personas.ownerUserId, user.id)),
+      ),
+    )
+    .limit(1);
+
+  if (!persona) {
+    return Response.json({ error: "Persona not found." }, { status: 404 });
+  }
+
   const [session] = await db
     .insert(sessions)
-    .values({ personaId })
+    .values({ personaId, userId: user.id })
     .returning({ id: sessions.id });
-
-  const persona = getAvailablePersonas().find((item) => item.id === personaId);
 
   return Response.json({
     sessionId: session.id,
-    persona,
+    persona: toPersonaSummary(persona),
   });
+}
+
+function toPersonaSummary(persona: typeof personas.$inferSelect) {
+  return {
+    id: persona.id,
+    name: persona.name,
+    avatarUrl: persona.avatarUrl,
+    tagline: persona.tagline,
+    bio: persona.bio,
+    topics: persona.topicsJson ?? [],
+    starterPrompts: persona.starterPromptsJson ?? [],
+    isBuiltIn: persona.isBuiltIn,
+  };
 }

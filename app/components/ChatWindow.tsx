@@ -1,7 +1,12 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
-import { AlertCircleIcon, RotateCcwIcon, SendIcon } from "lucide-react";
+import {
+  AlertCircleIcon,
+  LogOutIcon,
+  RotateCcwIcon,
+  SendIcon,
+} from "lucide-react";
 
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
 import { Button } from "@/components/ui/button";
@@ -14,9 +19,11 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
+import { authClient } from "@/lib/auth-client";
 import { cn } from "@/lib/utils";
 
 import { PersonaSwitch, type PersonaOption } from "./PersonaSwitch";
+import { ThemeToggle } from "./ThemeToggle";
 
 type ChatMessage = {
   id: string;
@@ -38,8 +45,7 @@ const FALLBACK_PERSONAS: PersonaOption[] = [
 
 export function ChatWindow() {
   const [personas, setPersonas] = useState<PersonaOption[]>(FALLBACK_PERSONAS);
-  const [activePersona, setActivePersona] =
-    useState<PersonaOption["id"]>("hitesh");
+  const [activePersona, setActivePersona] = useState("hitesh");
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
@@ -50,7 +56,7 @@ export function ChatWindow() {
   const abortRef = useRef<AbortController | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
 
-  const createSession = useCallback(async (personaId: PersonaOption["id"]) => {
+  const createSession = useCallback(async (personaId: string) => {
     abortRef.current?.abort();
     abortRef.current = null;
     setIsStartingSession(true);
@@ -211,6 +217,24 @@ export function ChatWindow() {
             value={activePersona}
             onValueChange={createSession}
           />
+          <ThemeToggle />
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            aria-label="Sign out"
+            onClick={() => {
+              void authClient.signOut({
+                fetchOptions: {
+                  onSuccess: () => {
+                    window.location.reload();
+                  },
+                },
+              });
+            }}
+          >
+            <LogOutIcon />
+          </Button>
         </div>
       </header>
 

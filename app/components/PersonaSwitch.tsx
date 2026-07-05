@@ -3,15 +3,21 @@
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 export type PersonaOption = {
-  id: "hitesh" | "piyush";
+  id: string;
   name: string;
+  avatarUrl?: string | null;
+  tagline?: string | null;
+  bio?: string | null;
+  topics?: string[];
+  starterPrompts?: string[];
+  isBuiltIn?: boolean;
 };
 
 type PersonaSwitchProps = {
   disabled?: boolean;
   personas: PersonaOption[];
-  value: PersonaOption["id"];
-  onValueChange: (personaId: PersonaOption["id"]) => void;
+  value: string;
+  onValueChange: (personaId: string) => void;
 };
 
 export function PersonaSwitch({
@@ -24,9 +30,7 @@ export function PersonaSwitch({
     <Tabs
       value={value}
       onValueChange={(nextValue) => {
-        if (isPersonaId(nextValue)) {
-          onValueChange(nextValue);
-        }
+        onValueChange(nextValue);
       }}
     >
       <TabsList className="w-full sm:w-fit">
@@ -43,8 +47,4 @@ export function PersonaSwitch({
       </TabsList>
     </Tabs>
   );
-}
-
-function isPersonaId(value: string): value is PersonaOption["id"] {
-  return value === "hitesh" || value === "piyush";
 }

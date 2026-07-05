@@ -6,6 +6,12 @@ export type FewShotExample = {
 export type PersonaData = {
   persona_id: string;
   name: string;
+  avatar_url?: string;
+  tagline?: string;
+  bio?: string;
+  topics?: string[];
+  starter_prompts?: string[];
+  source_count?: number;
   identity: string;
   catchphrases: string[];
   tone_traits: string[];
