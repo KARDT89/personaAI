@@ -7,6 +7,8 @@ import {
   createChatCompletionText,
   type LlmMessage,
 } from "@/lib/llm/client";
+import { buildSystemPrompt, type PersonaData } from "@/lib/personas";
+import { retrieveRelevantSourceMemories } from "@/lib/personas/sourceMemory";
 
 const RECENT_MESSAGE_LIMIT = 12;
 const SUMMARY_TRIGGER_COUNT = 20;
@@ -48,9 +50,20 @@ export async function POST(req: Request) {
   }
 
   const history = await getRecentMessages(input.sessionId);
-  const systemPrompt = session.memorySummary
-    ? `${persona.systemPrompt}\n\nEarlier conversation summary: ${session.memorySummary}`
-    : persona.systemPrompt;
+  const sourceMemories = await retrieveRelevantSourceMemories({
+    apiKey: input.apiKey,
+    personaId: input.personaId,
+    query: input.message,
+    userId: user.id,
+  });
+  const systemPrompt = persona.personaJson
+    ? buildSystemPrompt(
+        persona.personaJson as PersonaData,
+        session.memorySummary ?? undefined,
+        { email: user.email, name: user.name },
+        sourceMemories,
+      )
+    : buildLegacySystemPrompt(persona.systemPrompt, session.memorySummary, user.name, sourceMemories);
 
   const { db } = await import("@/lib/db");
 
@@ -141,6 +154,35 @@ function parseChatRequest(body: unknown) {
     model:
       typeof payload.model === "string" ? payload.model.trim() || undefined : undefined,
   };
+}
+
+function buildLegacySystemPrompt(
+  systemPrompt: string,
+  memorySummary: string | null,
+  userName: string | null | undefined,
+  sourceMemories: Array<{ text: string; speaker?: string | null }>,
+) {
+  const currentUser = userName?.trim() || "the current signed-in user";
+  const retrieved = sourceMemories
+    .map((memory, index) => {
+      const speaker = memory.speaker ? `Speaker: ${memory.speaker}\n` : "";
+      return `Memory ${index + 1}:\n${speaker}${memory.text}`;
+    })
+    .join("\n\n");
+
+  return `
+${systemPrompt}
+
+Current conversation:
+- You are speaking directly with ${currentUser}.
+- Do not treat the user as YouTube chat, viewers, subscribers, transcript readers, or the source-file audience.
+- Use retrieved source memories as factual context when relevant. If they are insufficient, avoid guessing.
+
+Retrieved source memories:
+${retrieved || "No source memories were retrieved for this turn."}
+
+${memorySummary ? `Earlier conversation summary: ${memorySummary}` : ""}
+`.trim();
 }
 
 async function getSession(sessionId: string, personaId: string, userId: string) {

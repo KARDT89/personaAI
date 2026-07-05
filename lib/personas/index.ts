@@ -1,6 +1,11 @@
 import hitesh from "./hitesh.json";
 import piyush from "./piyush.json";
-import { buildSystemPrompt, type PersonaData } from "./promptBuilder";
+import {
+  buildSystemPrompt,
+  type GenerationMeta,
+  type GenerationMode,
+  type PersonaData,
+} from "./promptBuilder";
 
 const personas = {
   hitesh: hitesh as PersonaData,
@@ -65,4 +70,4 @@ export function buildPersonaRecord(personaId: PersonaId) {
 }
 
 export { buildSystemPrompt };
-export type { PersonaData };
+export type { GenerationMeta, GenerationMode, PersonaData };

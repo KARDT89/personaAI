@@ -3,9 +3,11 @@
 import { ChangeEvent, FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import {
   AlertCircleIcon,
+  BookOpenIcon,
   BotIcon,
   ChevronDownIcon,
   FileTextIcon,
+  HeadphonesIcon,
   KeyRoundIcon,
   LibraryIcon,
   LogOutIcon,
@@ -72,7 +74,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { authClient } from "@/lib/auth-client";
-import type { PersonaData } from "@/lib/personas";
+import type { GenerationMeta, GenerationMode, PersonaData } from "@/lib/personas";
 import { cn } from "@/lib/utils";
 
 import { ThemeToggle } from "./ThemeToggle";
@@ -81,6 +83,7 @@ type ChatMessage = {
   id: string;
   role: "user" | "assistant";
   content: string;
+  citations?: LearningCitation[];
 };
 
 type PersonaOption = {
@@ -126,6 +129,7 @@ type SessionsResponse = {
   error?: string;
 };
 
+type AppMode = "personas" | "learning";
 type AppConfigResponse = {
   llm?: {
     appApiKeyAvailable?: boolean;
@@ -135,19 +139,91 @@ type AppConfigResponse = {
 
 type ApiKeyMode = "app" | "personal";
 type SourceType = "youtube-transcript" | "whatsapp-chat" | "other";
+type SourceMemoryPayload = {
+  sourceType: SourceType;
+  sourceChars: number;
+  targetSpeaker?: string | null;
+  userSpeaker?: string | null;
+  metadata?: Record<string, unknown>;
+  chunks: Array<{
+    chunkIndex: number;
+    speaker?: string | null;
+    text: string;
+    tokenHint?: number;
+    metadata?: Record<string, unknown>;
+  }>;
+};
 type PersonaDialogMode = "create" | "edit";
 type PersonaDialogStep = "source" | "review";
+type LearningSourceKind = "book_pdf" | "podcast_transcript";
+type LearningCitation = {
+  chunkIndex: number;
+  label: string;
+  pageEnd?: number | null;
+  pageStart?: number | null;
+  sourceId: string;
+};
+type LearningSource = {
+  id: string;
+  title: string;
+  sourceKind: LearningSourceKind;
+  originalFilename?: string | null;
+  sourceChars: number;
+  pageCount?: number | null;
+  chunkCount: number;
+  metadata?: Record<string, unknown>;
+  createdAt: string | null;
+  updatedAt: string | null;
+};
+type LearningSessionSummary = {
+  id: string;
+  title: string;
+  preview: string | null;
+  sourceId: string;
+  createdAt: string | null;
+  updatedAt: string | null;
+};
+type LearningSourcesResponse = {
+  sources?: LearningSource[];
+  source?: LearningSource;
+  error?: string;
+};
+type LearningSessionsResponse = {
+  sessions?: LearningSessionSummary[];
+  session?: LearningSessionSummary;
+  messages?: ChatMessage[];
+  error?: string;
+};
+type GenerationProgress =
+  | "idle"
+  | "reading"
+  | "splitting"
+  | "analyzing"
+  | "merging"
+  | "examples"
+  | "ready";
 type PersonaReviewForm = {
+  generationMode: GenerationMode;
   name: string;
   tagline: string;
   bio: string;
   identity: string;
+  voiceProfile: string;
+  languageProfile: string;
+  reasoningProfile: string;
+  interactionRules: string;
+  addressingRules: string;
+  phraseBank: string;
+  doRules: string;
+  dontRules: string;
   topics: string;
   starterPrompts: string;
   toneTraits: string;
   catchphrases: string;
   teachingPattern: string;
   fewShot: string;
+  scenarioExamples: string;
+  styleConfidence: string;
 };
 
 const FALLBACK_PERSONAS: PersonaOption[] = [
@@ -157,26 +233,39 @@ const FALLBACK_PERSONAS: PersonaOption[] = [
 
 export function ChatWindow() {
   const { data: authSession, refetch: refetchAuthSession } = authClient.useSession();
+  const [activeMode, setActiveMode] = useState<AppMode>("personas");
   const [personas, setPersonas] = useState<PersonaOption[]>(FALLBACK_PERSONAS);
   const [activePersona, setActivePersona] = useState("hitesh");
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [learningSources, setLearningSources] = useState<LearningSource[]>([]);
+  const [activeLearningSourceId, setActiveLearningSourceId] = useState<string | null>(null);
+  const [learningSessionId, setLearningSessionId] = useState<string | null>(null);
+  const [learningSessions, setLearningSessions] = useState<LearningSessionSummary[]>([]);
+  const [learningMessages, setLearningMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isLoadingPersonas, setIsLoadingPersonas] = useState(true);
   const [isLoadingSessions, setIsLoadingSessions] = useState(true);
+  const [isLoadingLearningSources, setIsLoadingLearningSources] = useState(true);
+  const [isLoadingLearningSessions, setIsLoadingLearningSessions] = useState(false);
   const [isStartingSession, setIsStartingSession] = useState(true);
   const [isStreaming, setIsStreaming] = useState(false);
   const [isMobileLibraryOpen, setIsMobileLibraryOpen] = useState(false);
   const [dialogMode, setDialogMode] = useState<PersonaDialogMode>("create");
   const [isPersonaDialogOpen, setIsPersonaDialogOpen] = useState(false);
+  const [isLearningSourceDialogOpen, setIsLearningSourceDialogOpen] = useState(false);
   const [personaBeingEdited, setPersonaBeingEdited] = useState<PersonaOption | null>(null);
   const [personaBeingDeleted, setPersonaBeingDeleted] = useState<PersonaOption | null>(null);
   const [sessionBeingDeleted, setSessionBeingDeleted] = useState<SessionSummary | null>(null);
+  const [learningSourceBeingDeleted, setLearningSourceBeingDeleted] = useState<LearningSource | null>(null);
+  const [learningSessionBeingDeleted, setLearningSessionBeingDeleted] = useState<LearningSessionSummary | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isDeletingPersona, setIsDeletingPersona] = useState(false);
   const [isDeletingSession, setIsDeletingSession] = useState(false);
+  const [isDeletingLearningSource, setIsDeletingLearningSource] = useState(false);
+  const [isDeletingLearningSession, setIsDeletingLearningSession] = useState(false);
   const [isCompactMode, setIsCompactMode] = useState(() =>
     readStoredSetting("persona-ai-compact-mode") === "true",
   );
@@ -198,6 +287,9 @@ export function ChatWindow() {
 
   const currentPersona =
     personas.find((persona) => persona.id === activePersona) ?? personas[0] ?? FALLBACK_PERSONAS[0];
+  const currentLearningSource =
+    learningSources.find((source) => source.id === activeLearningSourceId) ?? learningSources[0] ?? null;
+  const visibleMessages = activeMode === "learning" ? learningMessages : messages;
 
   useEffect(() => {
     localStorage.setItem("persona-ai-compact-mode", String(isCompactMode));
@@ -368,6 +460,123 @@ export function ChatWindow() {
     }
   }, []);
 
+  const loadLearningSources = useCallback(async () => {
+    setIsLoadingLearningSources(true);
+
+    try {
+      const response = await fetch("/api/learning-sources");
+      const data = (await response.json()) as LearningSourcesResponse;
+
+      if (!response.ok) {
+        throw new Error(data.error ?? "Could not load learning sources.");
+      }
+
+      setLearningSources(data.sources ?? []);
+      return data.sources ?? [];
+    } catch (caughtError) {
+      setError(getErrorMessage(caughtError));
+      return [];
+    } finally {
+      setIsLoadingLearningSources(false);
+    }
+  }, []);
+
+  const loadLearningSessions = useCallback(async (sourceId: string) => {
+    setIsLoadingLearningSessions(true);
+
+    try {
+      const response = await fetch(`/api/learning-sources/${sourceId}/sessions`);
+      const data = (await response.json()) as LearningSessionsResponse;
+
+      if (!response.ok) {
+        throw new Error(data.error ?? "Could not load learning chats.");
+      }
+
+      setLearningSessions(data.sessions ?? []);
+      return data.sessions ?? [];
+    } catch (caughtError) {
+      setError(getErrorMessage(caughtError));
+      return [];
+    } finally {
+      setIsLoadingLearningSessions(false);
+    }
+  }, []);
+
+  const startNewLearningDraft = useCallback((sourceId: string) => {
+    abortRef.current?.abort();
+    abortRef.current = null;
+    setIsStreaming(false);
+    setError(null);
+    setLearningMessages([]);
+    setLearningSessionId(null);
+    setActiveLearningSourceId(sourceId);
+    setInput("");
+    setIsStartingSession(false);
+  }, []);
+
+  const openLearningSession = useCallback(async (nextSessionId: string) => {
+    abortRef.current?.abort();
+    abortRef.current = null;
+    setIsStartingSession(true);
+    setIsStreaming(false);
+    setError(null);
+    setLearningMessages([]);
+
+    try {
+      const response = await fetch(`/api/learning-sessions/${nextSessionId}`);
+      const data = (await response.json()) as LearningSessionsResponse;
+
+      if (!response.ok || !data.session) {
+        throw new Error(data.error ?? "Could not open learning chat.");
+      }
+
+      setActiveLearningSourceId(data.session.sourceId);
+      setLearningSessionId(data.session.id);
+      setLearningMessages(data.messages ?? []);
+    } catch (caughtError) {
+      setError(getErrorMessage(caughtError));
+    } finally {
+      setIsStartingSession(false);
+    }
+  }, []);
+
+  const createLearningSession = useCallback(async (sourceId: string) => {
+    try {
+      const response = await fetch(`/api/learning-sources/${sourceId}/sessions`, {
+        method: "POST",
+      });
+      const data = (await response.json()) as LearningSessionsResponse;
+
+      if (!response.ok || !data.session) {
+        throw new Error(data.error ?? "Could not start learning chat.");
+      }
+
+      setLearningSessionId(data.session.id);
+      setActiveLearningSourceId(sourceId);
+      return data.session;
+    } catch (caughtError) {
+      setError(getErrorMessage(caughtError));
+      return null;
+    }
+  }, []);
+
+  const openLatestLearningSessionForSource = useCallback(
+    async (sourceId: string) => {
+      setActiveLearningSourceId(sourceId);
+      setActiveMode("learning");
+      const loadedSessions = await loadLearningSessions(sourceId);
+      const latestSession = loadedSessions[0];
+
+      if (latestSession) {
+        await openLearningSession(latestSession.id);
+        return;
+      }
+
+      startNewLearningDraft(sourceId);
+    },
+    [loadLearningSessions, openLearningSession, startNewLearningDraft],
+  );
+
   useEffect(() => {
     if (didInitRef.current) {
       return;
@@ -378,10 +587,16 @@ export function ChatWindow() {
     async function boot() {
       const loadedPersonas = await loadPersonas();
       const loadedSessions = await loadSessions();
+      const loadedLearningSources = await loadLearningSources();
       const firstPersonaId = loadedPersonas[0]?.id ?? "hitesh";
       const latestSession = loadedSessions.find(
         (session) => session.personaId === firstPersonaId,
       );
+
+      if (loadedLearningSources[0]) {
+        setActiveLearningSourceId(loadedLearningSources[0].id);
+        void loadLearningSessions(loadedLearningSources[0].id);
+      }
 
       if (latestSession) {
         await openSession(latestSession.id);
@@ -391,7 +606,7 @@ export function ChatWindow() {
     }
 
     void boot();
-  }, [loadPersonas, loadSessions, openSession, startNewDraft]);
+  }, [loadLearningSessions, loadLearningSources, loadPersonas, loadSessions, openSession, startNewDraft]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -399,6 +614,11 @@ export function ChatWindow() {
     const nextMessage = input.trim();
 
     if (!nextMessage || isStreaming || isStartingSession) {
+      return;
+    }
+
+    if (activeMode === "learning") {
+      await handleLearningSubmit(nextMessage);
       return;
     }
 
@@ -493,6 +713,112 @@ export function ChatWindow() {
     }
   }
 
+  async function handleLearningSubmit(nextMessage: string) {
+    if (!currentLearningSource) {
+      setError("Add a book or podcast transcript first.");
+      return;
+    }
+
+    let nextSessionId = learningSessionId;
+
+    if (!nextSessionId) {
+      setIsStartingSession(true);
+      const createdSession = await createLearningSession(currentLearningSource.id);
+      setIsStartingSession(false);
+
+      if (!createdSession) {
+        return;
+      }
+
+      nextSessionId = createdSession.id;
+    }
+
+    const userMessage: ChatMessage = {
+      id: crypto.randomUUID(),
+      role: "user",
+      content: nextMessage,
+    };
+    const assistantId = crypto.randomUUID();
+
+    setInput("");
+    setError(null);
+    setIsStreaming(true);
+    setLearningMessages((currentMessages) => [
+      ...currentMessages,
+      userMessage,
+      { id: assistantId, role: "assistant", content: "" },
+    ]);
+
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    try {
+      const response = await fetch("/api/learning/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId: nextSessionId,
+          sourceId: currentLearningSource.id,
+          message: nextMessage,
+          apiKey: apiKeyMode === "personal" ? personalApiKey.trim() || undefined : undefined,
+          model: preferredModel.trim() || undefined,
+        }),
+        signal: controller.signal,
+      });
+      const citations = readLearningCitations(response.headers.get("X-Learning-Citations"));
+
+      if (!response.ok || !response.body) {
+        const data = await readJsonError(response);
+        throw new Error(data ?? "Learning chat request failed.");
+      }
+
+      if (citations.length > 0) {
+        setLearningMessages((currentMessages) =>
+          currentMessages.map((message) =>
+            message.id === assistantId ? { ...message, citations } : message,
+          ),
+        );
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+
+      while (true) {
+        const { done, value } = await reader.read();
+
+        if (done) {
+          break;
+        }
+
+        const chunk = decoder.decode(value, { stream: true });
+
+        if (!chunk) {
+          continue;
+        }
+
+        setLearningMessages((currentMessages) =>
+          currentMessages.map((message) =>
+            message.id === assistantId
+              ? { ...message, content: message.content + chunk }
+              : message,
+          ),
+        );
+      }
+    } catch (caughtError) {
+      if ((caughtError as Error).name !== "AbortError") {
+        setError(getErrorMessage(caughtError));
+        setInput(nextMessage);
+        setLearningMessages((currentMessages) =>
+          currentMessages.filter((message) => message.id !== assistantId),
+        );
+      }
+    } finally {
+      setIsStreaming(false);
+      abortRef.current = null;
+      await loadLearningSessions(currentLearningSource.id);
+    }
+  }
+
   function openCreatePersona() {
     setDialogMode("create");
     setPersonaBeingEdited(null);
@@ -576,9 +902,100 @@ export function ChatWindow() {
     }
   }
 
-  const canSend = Boolean(input.trim()) && !isStreaming && !isStartingSession;
+  async function handleLearningSourceSaved(source: LearningSource) {
+    const loadedSources = await loadLearningSources();
+    const nextSource = loadedSources.find((item) => item.id === source.id) ?? source;
+    setIsLearningSourceDialogOpen(false);
+    setActiveMode("learning");
+    await openLatestLearningSessionForSource(nextSource.id);
+  }
+
+  async function handleDeleteLearningSource() {
+    if (!learningSourceBeingDeleted) {
+      return;
+    }
+
+    setIsDeletingLearningSource(true);
+
+    try {
+      const response = await fetch(`/api/learning-sources/${learningSourceBeingDeleted.id}`, {
+        method: "DELETE",
+      });
+      const data = (await response.json()) as { error?: string };
+
+      if (!response.ok) {
+        throw new Error(data.error ?? "Could not delete source.");
+      }
+
+      toast.success("Learning source deleted.");
+      const deletedSource = learningSourceBeingDeleted;
+      const loadedSources = await loadLearningSources();
+      setLearningSourceBeingDeleted(null);
+
+      if (deletedSource.id === activeLearningSourceId) {
+        const nextSource = loadedSources[0];
+
+        if (nextSource) {
+          await openLatestLearningSessionForSource(nextSource.id);
+        } else {
+          setActiveLearningSourceId(null);
+          setLearningSessionId(null);
+          setLearningMessages([]);
+        }
+      }
+    } catch (caughtError) {
+      toast.error(getErrorMessage(caughtError));
+    } finally {
+      setIsDeletingLearningSource(false);
+    }
+  }
+
+  async function handleDeleteLearningSession() {
+    if (!learningSessionBeingDeleted) {
+      return;
+    }
+
+    setIsDeletingLearningSession(true);
+
+    try {
+      const response = await fetch(`/api/learning-sessions/${learningSessionBeingDeleted.id}`, {
+        method: "DELETE",
+      });
+      const data = (await response.json()) as { error?: string };
+
+      if (!response.ok) {
+        throw new Error(data.error ?? "Could not delete learning chat.");
+      }
+
+      toast.success("Learning chat deleted.");
+      const deletedSession = learningSessionBeingDeleted;
+      setLearningSessionBeingDeleted(null);
+      await loadLearningSessions(deletedSession.sourceId);
+
+      if (deletedSession.id === learningSessionId) {
+        startNewLearningDraft(deletedSession.sourceId);
+      }
+    } catch (caughtError) {
+      toast.error(getErrorMessage(caughtError));
+    } finally {
+      setIsDeletingLearningSession(false);
+    }
+  }
+
+  const canSend =
+    Boolean(input.trim()) &&
+    !isStreaming &&
+    !isStartingSession &&
+    (activeMode === "personas" || Boolean(currentLearningSource));
   const apiModeLabel = apiKeyMode === "personal" ? "Personal key" : "App key";
-  const sessionStateLabel = sessionId ? "Open chat" : "Draft";
+  const sessionStateLabel =
+    activeMode === "learning"
+      ? learningSessionId
+        ? "Learning chat"
+        : "Learning draft"
+      : sessionId
+        ? "Open chat"
+        : "Draft";
 
   return (
     <div
@@ -588,19 +1005,40 @@ export function ChatWindow() {
       )}
     >
       <aside className="hidden min-h-0 min-w-0 overflow-hidden border-r bg-sidebar/95 text-sidebar-foreground lg:block">
-        <PersonaLibrary
-          activePersonaId={activePersona}
-          activeSessionId={sessionId}
-          disabled={isStreaming || isStartingSession}
-          isLoading={isLoadingPersonas || isLoadingSessions}
-          personas={personas}
-          sessions={sessions}
-          onCreate={openCreatePersona}
-          onDeleteSession={setSessionBeingDeleted}
-          onNewChat={startNewDraft}
-          onSelectPersona={(personaId) => void openLatestSessionForPersona(personaId)}
-          onSelectSession={(nextSessionId) => void openSession(nextSessionId)}
-        />
+        {activeMode === "personas" ? (
+          <PersonaLibrary
+            activeMode={activeMode}
+            activePersonaId={activePersona}
+            activeSessionId={sessionId}
+            disabled={isStreaming || isStartingSession}
+            isLoading={isLoadingPersonas || isLoadingSessions}
+            personas={personas}
+            sessions={sessions}
+            onCreate={openCreatePersona}
+            onDeleteSession={setSessionBeingDeleted}
+            onModeChange={setActiveMode}
+            onNewChat={startNewDraft}
+            onSelectPersona={(personaId) => void openLatestSessionForPersona(personaId)}
+            onSelectSession={(nextSessionId) => void openSession(nextSessionId)}
+          />
+        ) : (
+          <LearningLibrary
+            activeMode={activeMode}
+            activeSessionId={learningSessionId}
+            activeSourceId={activeLearningSourceId}
+            disabled={isStreaming || isStartingSession}
+            isLoading={isLoadingLearningSources || isLoadingLearningSessions}
+            sessions={learningSessions}
+            sources={learningSources}
+            onCreate={() => setIsLearningSourceDialogOpen(true)}
+            onDeleteSession={setLearningSessionBeingDeleted}
+            onDeleteSource={setLearningSourceBeingDeleted}
+            onModeChange={setActiveMode}
+            onNewChat={startNewLearningDraft}
+            onSelectSession={(nextSessionId) => void openLearningSession(nextSessionId)}
+            onSelectSource={(sourceId) => void openLatestLearningSessionForSource(sourceId)}
+          />
+        )}
       </aside>
 
       <section className="flex min-h-0 min-w-0 flex-col overflow-hidden bg-background">
@@ -613,43 +1051,102 @@ export function ChatWindow() {
               </SheetTrigger>
               <SheetContent side="left" className="w-[20rem] p-0">
                 <SheetHeader className="border-b">
-                  <SheetTitle>Personas</SheetTitle>
+                  <SheetTitle>{activeMode === "learning" ? "Self Development" : "Personas"}</SheetTitle>
                 </SheetHeader>
-                <PersonaLibrary
-                  activePersonaId={activePersona}
-                  activeSessionId={sessionId}
-                  disabled={isStreaming || isStartingSession}
-                  isLoading={isLoadingPersonas || isLoadingSessions}
-                  personas={personas}
-                  sessions={sessions}
-                  onCreate={() => {
-                    setIsMobileLibraryOpen(false);
-                    openCreatePersona();
-                  }}
-                  onDeleteSession={(session) => {
-                    setIsMobileLibraryOpen(false);
-                    setSessionBeingDeleted(session);
-                  }}
-                  onNewChat={(personaId) => {
-                    setIsMobileLibraryOpen(false);
-                    startNewDraft(personaId);
-                  }}
-                  onSelectPersona={(personaId) => {
-                    setIsMobileLibraryOpen(false);
-                    void openLatestSessionForPersona(personaId);
-                  }}
-                  onSelectSession={(nextSessionId) => {
-                    setIsMobileLibraryOpen(false);
-                    void openSession(nextSessionId);
-                  }}
-                />
+                {activeMode === "personas" ? (
+                  <PersonaLibrary
+                    activeMode={activeMode}
+                    activePersonaId={activePersona}
+                    activeSessionId={sessionId}
+                    disabled={isStreaming || isStartingSession}
+                    isLoading={isLoadingPersonas || isLoadingSessions}
+                    personas={personas}
+                    sessions={sessions}
+                    onCreate={() => {
+                      setIsMobileLibraryOpen(false);
+                      openCreatePersona();
+                    }}
+                    onDeleteSession={(session) => {
+                      setIsMobileLibraryOpen(false);
+                      setSessionBeingDeleted(session);
+                    }}
+                    onModeChange={setActiveMode}
+                    onNewChat={(personaId) => {
+                      setIsMobileLibraryOpen(false);
+                      startNewDraft(personaId);
+                    }}
+                    onSelectPersona={(personaId) => {
+                      setIsMobileLibraryOpen(false);
+                      void openLatestSessionForPersona(personaId);
+                    }}
+                    onSelectSession={(nextSessionId) => {
+                      setIsMobileLibraryOpen(false);
+                      void openSession(nextSessionId);
+                    }}
+                  />
+                ) : (
+                  <LearningLibrary
+                    activeMode={activeMode}
+                    activeSessionId={learningSessionId}
+                    activeSourceId={activeLearningSourceId}
+                    disabled={isStreaming || isStartingSession}
+                    isLoading={isLoadingLearningSources || isLoadingLearningSessions}
+                    sessions={learningSessions}
+                    sources={learningSources}
+                    onCreate={() => {
+                      setIsMobileLibraryOpen(false);
+                      setIsLearningSourceDialogOpen(true);
+                    }}
+                    onDeleteSession={(session) => {
+                      setIsMobileLibraryOpen(false);
+                      setLearningSessionBeingDeleted(session);
+                    }}
+                    onDeleteSource={(source) => {
+                      setIsMobileLibraryOpen(false);
+                      setLearningSourceBeingDeleted(source);
+                    }}
+                    onModeChange={setActiveMode}
+                    onNewChat={(sourceId) => {
+                      setIsMobileLibraryOpen(false);
+                      startNewLearningDraft(sourceId);
+                    }}
+                    onSelectSession={(nextSessionId) => {
+                      setIsMobileLibraryOpen(false);
+                      void openLearningSession(nextSessionId);
+                    }}
+                    onSelectSource={(sourceId) => {
+                      setIsMobileLibraryOpen(false);
+                      void openLatestLearningSessionForSource(sourceId);
+                    }}
+                  />
+                )}
               </SheetContent>
             </Sheet>
-            <PersonaAvatar persona={currentPersona} />
+            {activeMode === "learning" ? (
+              <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-muted">
+                {currentLearningSource?.sourceKind === "podcast_transcript" ? (
+                  <HeadphonesIcon className="size-4" />
+                ) : (
+                  <BookOpenIcon className="size-4" />
+                )}
+              </div>
+            ) : (
+              <PersonaAvatar persona={currentPersona} />
+            )}
             <div className="min-w-0">
-              <h1 className="truncate text-sm font-semibold">{currentPersona.name}</h1>
+              <h1 className="truncate text-sm font-semibold">
+                {activeMode === "learning"
+                  ? currentLearningSource?.title ?? "Self Development"
+                  : currentPersona.name}
+              </h1>
               <p className="truncate text-xs text-muted-foreground">
-                {sessionId ? currentPersona.tagline ?? "Conversation open" : "Draft chat ready"}
+                {activeMode === "learning"
+                  ? currentLearningSource
+                    ? sourceKindLabel(currentLearningSource.sourceKind)
+                    : "Add a source to begin"
+                  : sessionId
+                    ? currentPersona.tagline ?? "Conversation open"
+                    : "Draft chat ready"}
               </p>
             </div>
           </div>
@@ -674,7 +1171,11 @@ export function ChatWindow() {
               size="sm"
               className="hidden sm:inline-flex"
               disabled={isStreaming || isStartingSession}
-              onClick={() => startNewDraft(activePersona)}
+              onClick={() =>
+                activeMode === "learning" && currentLearningSource
+                  ? startNewLearningDraft(currentLearningSource.id)
+                  : startNewDraft(activePersona)
+              }
             >
               <PlusIcon />
               New chat
@@ -741,15 +1242,24 @@ export function ChatWindow() {
                     isCompactMode ? "gap-2 py-3" : "gap-4 py-6",
                   )}
                 >
-                  {messages.length === 0 ? (
-                    <EmptyChat
-                      isStartingSession={isStartingSession}
-                      persona={currentPersona}
-                      onPromptClick={setInput}
-                    />
+                  {visibleMessages.length === 0 ? (
+                    activeMode === "learning" ? (
+                      <EmptyLearningChat
+                        isStartingSession={isStartingSession}
+                        source={currentLearningSource}
+                        onCreate={() => setIsLearningSourceDialogOpen(true)}
+                        onPromptClick={setInput}
+                      />
+                    ) : (
+                      <EmptyChat
+                        isStartingSession={isStartingSession}
+                        persona={currentPersona}
+                        onPromptClick={setInput}
+                      />
+                    )
                   ) : (
                     <MessageGroup className="flex w-full gap-4">
-                      {messages.map((message) => (
+                      {visibleMessages.map((message) => (
                           <MessageScrollerItem key={message.id} className="animate-message-in">
                           <Message
                             align={message.role === "user" ? "end" : "start"}
@@ -757,7 +1267,11 @@ export function ChatWindow() {
                           >
                             <MessageContent className="min-w-0 max-w-[min(42rem,85%)]">
                               <MessageHeader>
-                                {message.role === "user" ? "You" : currentPersona.name}
+                                {message.role === "user"
+                                  ? "You"
+                                  : activeMode === "learning"
+                                    ? "Study assistant"
+                                    : currentPersona.name}
                               </MessageHeader>
                               <Bubble
                                 align={message.role === "user" ? "end" : "start"}
@@ -775,6 +1289,11 @@ export function ChatWindow() {
                                   )}
                                 </BubbleContent>
                               </Bubble>
+                              {activeMode === "learning" &&
+                              message.role === "assistant" &&
+                              message.citations?.length ? (
+                                <CitationRow citations={message.citations} />
+                              ) : null}
                             </MessageContent>
                           </Message>
                         </MessageScrollerItem>
@@ -789,7 +1308,7 @@ export function ChatWindow() {
           </MessageScrollerProvider>
 
           <form onSubmit={handleSubmit} className="border-t bg-background/95 p-3 shadow-[0_-12px_30px_rgba(0,0,0,0.03)] backdrop-blur">
-            <div className="mx-auto flex max-w-3xl items-end gap-2 rounded-3xl border bg-background p-2 shadow-sm transition-shadow focus-within:shadow-lg focus-within:ring-3 focus-within:ring-ring/20">
+            <div className="mx-auto flex max-w-3xl items-center gap-2 rounded-3xl border bg-background p-2 shadow-sm transition-shadow focus-within:shadow-lg focus-within:ring-3 focus-within:ring-ring/20">
               <Label htmlFor="chat-message" className="sr-only">
                 Message
               </Label>
@@ -805,10 +1324,22 @@ export function ChatWindow() {
                   }
                 }}
                 disabled={isStartingSession}
-                placeholder={`Message ${currentPersona.name}…`}
-                className="max-h-36 min-h-12 flex-1 border-transparent bg-transparent shadow-none focus-visible:ring-0"
+                placeholder={
+                  activeMode === "learning"
+                    ? currentLearningSource
+                      ? `Ask about ${currentLearningSource.title}...`
+                      : "Add a source to begin..."
+                    : `Message ${currentPersona.name}...`
+                }
+                className="max-h-36 min-h-10 flex-1 resize-none border-transparent bg-transparent py-2.5 shadow-none focus-visible:ring-0"
               />
-              <Button type="submit" size="icon-lg" disabled={!canSend} aria-label="Send message">
+              <Button
+                type="submit"
+                size="icon-lg"
+                disabled={!canSend}
+                aria-label="Send message"
+                className="self-center"
+              >
                 {isStreaming ? <Spinner /> : <SendIcon />}
               </Button>
             </div>
@@ -822,17 +1353,30 @@ export function ChatWindow() {
           !showProfileRail && "xl:hidden",
         )}
       >
-        <PersonaDetails
-          compactMode={isCompactMode}
-          persona={currentPersona}
-          showProfileRail={showProfileRail}
-          onCompactModeChange={setIsCompactMode}
-          onCreate={openCreatePersona}
-          onDelete={setPersonaBeingDeleted}
-          onEdit={openEditPersona}
-          onPromptClick={setInput}
-          onShowProfileRailChange={setShowProfileRail}
-        />
+        {activeMode === "learning" ? (
+          <LearningDetails
+            compactMode={isCompactMode}
+            showProfileRail={showProfileRail}
+            source={currentLearningSource}
+            onCompactModeChange={setIsCompactMode}
+            onCreate={() => setIsLearningSourceDialogOpen(true)}
+            onDelete={setLearningSourceBeingDeleted}
+            onPromptClick={setInput}
+            onShowProfileRailChange={setShowProfileRail}
+          />
+        ) : (
+          <PersonaDetails
+            compactMode={isCompactMode}
+            persona={currentPersona}
+            showProfileRail={showProfileRail}
+            onCompactModeChange={setIsCompactMode}
+            onCreate={openCreatePersona}
+            onDelete={setPersonaBeingDeleted}
+            onEdit={openEditPersona}
+            onPromptClick={setInput}
+            onShowProfileRailChange={setShowProfileRail}
+          />
+        )}
       </aside>
 
       <SettingsDialog
@@ -856,11 +1400,20 @@ export function ChatWindow() {
 
       <PersonaEditorDialog
         key={`${dialogMode}-${personaBeingEdited?.id ?? "new"}-${isPersonaDialogOpen}`}
+        apiKey={apiKeyMode === "personal" ? personalApiKey.trim() || undefined : undefined}
         mode={dialogMode}
+        model={preferredModel.trim() || undefined}
         open={isPersonaDialogOpen}
         persona={personaBeingEdited}
         onOpenChange={setIsPersonaDialogOpen}
         onSaved={(persona) => void handlePersonaSaved(persona)}
+      />
+
+      <LearningSourceDialog
+        apiKey={apiKeyMode === "personal" ? personalApiKey.trim() || undefined : undefined}
+        open={isLearningSourceDialogOpen}
+        onOpenChange={setIsLearningSourceDialogOpen}
+        onSaved={(source) => void handleLearningSourceSaved(source)}
       />
 
       <Dialog
@@ -934,11 +1487,84 @@ export function ChatWindow() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <Dialog
+        open={Boolean(learningSourceBeingDeleted)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setLearningSourceBeingDeleted(null);
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete learning source?</DialogTitle>
+            <DialogDescription>
+              This removes the source, its chunks, and its learning chats.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setLearningSourceBeingDeleted(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={isDeletingLearningSource}
+              onClick={() => void handleDeleteLearningSource()}
+            >
+              {isDeletingLearningSource ? <Spinner /> : <Trash2Icon />}
+              Delete source
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={Boolean(learningSessionBeingDeleted)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setLearningSessionBeingDeleted(null);
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete learning chat?</DialogTitle>
+            <DialogDescription>
+              This removes the conversation and its messages.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setLearningSessionBeingDeleted(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={isDeletingLearningSession}
+              onClick={() => void handleDeleteLearningSession()}
+            >
+              {isDeletingLearningSession ? <Spinner /> : <Trash2Icon />}
+              Delete chat
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
 
 function PersonaLibrary({
+  activeMode,
   activeSessionId,
   activePersonaId,
   disabled,
@@ -947,10 +1573,12 @@ function PersonaLibrary({
   sessions,
   onCreate,
   onDeleteSession,
+  onModeChange,
   onNewChat,
   onSelectPersona,
   onSelectSession,
 }: {
+  activeMode: AppMode;
   activeSessionId: string | null;
   activePersonaId: string;
   disabled: boolean;
@@ -959,6 +1587,7 @@ function PersonaLibrary({
   sessions: SessionSummary[];
   onCreate: () => void;
   onDeleteSession: (session: SessionSummary) => void;
+  onModeChange: (mode: AppMode) => void;
   onNewChat: (personaId: string) => void;
   onSelectPersona: (personaId: string) => void;
   onSelectSession: (sessionId: string) => void;
@@ -974,6 +1603,7 @@ function PersonaLibrary({
           <PlusIcon />
         </Button>
       </div>
+      <AppModeSwitch activeMode={activeMode} onModeChange={onModeChange} />
       <ScrollArea className="min-h-0 flex-1 p-2">
         <div className="grid min-w-0 gap-2">
           {isLoading
@@ -1120,6 +1750,254 @@ function ChatHistoryRow({
         onClick={() => onDelete(session)}
       >
         <Trash2Icon />
+      </Button>
+    </div>
+  );
+}
+
+function LearningLibrary({
+  activeMode,
+  activeSessionId,
+  activeSourceId,
+  disabled,
+  isLoading,
+  sessions,
+  sources,
+  onCreate,
+  onDeleteSession,
+  onDeleteSource,
+  onModeChange,
+  onNewChat,
+  onSelectSession,
+  onSelectSource,
+}: {
+  activeMode: AppMode;
+  activeSessionId: string | null;
+  activeSourceId: string | null;
+  disabled: boolean;
+  isLoading: boolean;
+  sessions: LearningSessionSummary[];
+  sources: LearningSource[];
+  onCreate: () => void;
+  onDeleteSession: (session: LearningSessionSummary) => void;
+  onDeleteSource: (source: LearningSource) => void;
+  onModeChange: (mode: AppMode) => void;
+  onNewChat: (sourceId: string) => void;
+  onSelectSession: (sessionId: string) => void;
+  onSelectSource: (sourceId: string) => void;
+}) {
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="flex h-16 items-center justify-between border-b px-4">
+        <div className="flex min-w-0 items-center gap-2 font-semibold">
+          <BookOpenIcon className="size-4 shrink-0" />
+          <span className="truncate">Self Development</span>
+        </div>
+        <Button type="button" size="icon-sm" onClick={onCreate} aria-label="Add source">
+          <PlusIcon />
+        </Button>
+      </div>
+      <AppModeSwitch activeMode={activeMode} onModeChange={onModeChange} />
+      <ScrollArea className="min-h-0 flex-1 p-2">
+        <div className="grid min-w-0 gap-2">
+          {isLoading ? (
+            Array.from({ length: 4 }).map((_, index) => (
+              <Skeleton key={index} className="h-20 rounded-lg" />
+            ))
+          ) : sources.length > 0 ? (
+            sources.map((source) => {
+              const sourceSessions = sessions
+                .filter((session) => session.sourceId === source.id)
+                .slice(0, 6);
+              const isActiveSource = source.id === activeSourceId;
+              const hasActiveSession = sourceSessions.some(
+                (session) => session.id === activeSessionId,
+              );
+
+              return (
+                <Collapsible
+                  key={source.id}
+                  defaultOpen={isActiveSource || hasActiveSession}
+                  className="min-w-0 overflow-hidden rounded-lg border bg-background/70 shadow-sm"
+                >
+                  <div className="flex min-w-0 items-center gap-1 p-1.5">
+                    <CollapsibleTrigger
+                      render={
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-sm"
+                          className="shrink-0 text-muted-foreground"
+                          aria-label={`Toggle ${source.title} chats`}
+                        />
+                      }
+                    >
+                      <ChevronDownIcon />
+                    </CollapsibleTrigger>
+                    <button
+                      type="button"
+                      disabled={disabled}
+                      onClick={() => onSelectSource(source.id)}
+                      className={cn(
+                        "flex min-w-0 flex-1 items-center gap-2 rounded-md p-2 text-left transition hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60",
+                        isActiveSource && "bg-muted",
+                      )}
+                    >
+                      <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-muted">
+                        {source.sourceKind === "podcast_transcript" ? (
+                          <HeadphonesIcon className="size-4" />
+                        ) : (
+                          <BookOpenIcon className="size-4" />
+                        )}
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-medium">{source.title}</span>
+                        <span className="block truncate text-xs text-muted-foreground">
+                          {sourceKindLabel(source.sourceKind)} / {source.chunkCount} chunks
+                        </span>
+                      </span>
+                    </button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      disabled={disabled}
+                      className="shrink-0 text-muted-foreground hover:text-destructive"
+                      aria-label={`Delete ${source.title}`}
+                      onClick={() => onDeleteSource(source)}
+                    >
+                      <Trash2Icon />
+                    </Button>
+                  </div>
+
+                  <CollapsibleContent>
+                    <div className="grid min-w-0 gap-1 px-1.5 pb-2 pl-8">
+                      {sourceSessions.length > 0 ? (
+                        sourceSessions.map((session) => (
+                          <LearningChatHistoryRow
+                            key={session.id}
+                            disabled={disabled}
+                            isActive={session.id === activeSessionId}
+                            session={session}
+                            onDelete={onDeleteSession}
+                            onSelect={onSelectSession}
+                          />
+                        ))
+                      ) : (
+                        <div className="rounded-md border border-dashed px-3 py-3 text-xs text-muted-foreground">
+                          No saved learning chats yet.
+                        </div>
+                      )}
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="xs"
+                        className="mt-1 w-fit justify-start px-2"
+                        disabled={disabled}
+                        onClick={() => onNewChat(source.id)}
+                      >
+                        <PlusIcon />
+                        New chat
+                      </Button>
+                    </div>
+                  </CollapsibleContent>
+                </Collapsible>
+              );
+            })
+          ) : (
+            <div className="rounded-lg border border-dashed bg-background/70 p-4 text-sm text-muted-foreground">
+              Add a book PDF or podcast transcript to start building your learning library.
+            </div>
+          )}
+        </div>
+      </ScrollArea>
+    </div>
+  );
+}
+
+function LearningChatHistoryRow({
+  disabled,
+  isActive,
+  onDelete,
+  onSelect,
+  session,
+}: {
+  disabled: boolean;
+  isActive: boolean;
+  onDelete: (session: LearningSessionSummary) => void;
+  onSelect: (sessionId: string) => void;
+  session: LearningSessionSummary;
+}) {
+  const title = session.title === "New chat" ? "Untitled chat" : session.title;
+
+  return (
+    <div
+      className={cn(
+        "group flex min-w-0 max-w-full items-start gap-1 overflow-hidden rounded-md transition hover:bg-muted",
+        isActive && "bg-muted text-foreground",
+      )}
+    >
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => onSelect(session.id)}
+        className="min-w-0 flex-1 overflow-hidden rounded-md px-2.5 py-2 text-left focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
+      >
+        <span className="flex min-w-0 items-center gap-2">
+          <MessageSquareIcon className="size-3.5 shrink-0 text-muted-foreground" />
+          <span className="truncate text-xs font-medium">{title}</span>
+        </span>
+        <span className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">
+          {session.preview ?? "Saved learning conversation."}
+        </span>
+        <span className="mt-1 block text-[11px] text-muted-foreground">
+          {formatSessionDate(session.updatedAt ?? session.createdAt)}
+        </span>
+      </button>
+
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-sm"
+        disabled={disabled}
+        className="mt-1 shrink-0 text-muted-foreground hover:text-destructive"
+        aria-label={`Delete ${title}`}
+        onClick={() => onDelete(session)}
+      >
+        <Trash2Icon />
+      </Button>
+    </div>
+  );
+}
+
+function AppModeSwitch({
+  activeMode,
+  onModeChange,
+}: {
+  activeMode: AppMode;
+  onModeChange: (mode: AppMode) => void;
+}) {
+  return (
+    <div className="grid grid-cols-2 gap-1 border-b p-2">
+      <Button
+        type="button"
+        variant={activeMode === "personas" ? "secondary" : "ghost"}
+        size="sm"
+        className="justify-center"
+        onClick={() => onModeChange("personas")}
+      >
+        <BotIcon />
+        Personas
+      </Button>
+      <Button
+        type="button"
+        variant={activeMode === "learning" ? "secondary" : "ghost"}
+        size="sm"
+        className="justify-center"
+        onClick={() => onModeChange("learning")}
+      >
+        <BookOpenIcon />
+        Self Dev
       </Button>
     </div>
   );
@@ -1767,14 +2645,443 @@ function EmptyChat({
   );
 }
 
+function EmptyLearningChat({
+  isStartingSession,
+  source,
+  onCreate,
+  onPromptClick,
+}: {
+  isStartingSession: boolean;
+  source: LearningSource | null;
+  onCreate: () => void;
+  onPromptClick: (prompt: string) => void;
+}) {
+  if (isStartingSession) {
+    return (
+      <div className="flex min-h-72 flex-1 items-center justify-center">
+        <Spinner className="size-5 text-muted-foreground" />
+      </div>
+    );
+  }
+
+  if (!source) {
+    return (
+      <div className="flex min-h-72 flex-1 items-center justify-center">
+        <div className="w-full max-w-xl text-center">
+          <div className="mx-auto mb-4 flex size-16 items-center justify-center rounded-full bg-muted">
+            <BookOpenIcon className="size-7 text-muted-foreground" />
+          </div>
+          <h2 className="text-xl font-semibold text-pretty">Build your self-development library</h2>
+          <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-muted-foreground">
+            Add a book PDF or podcast transcript, then ask for lessons, principles, and practical next steps.
+          </p>
+          <Button type="button" className="mt-5" onClick={onCreate}>
+            <PlusIcon />
+            Add source
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  const prompts = [
+    "What are the core ideas I should remember?",
+    "Give me practical action steps from this source.",
+    "What mental models does this teach?",
+  ];
+
+  return (
+    <div className="flex min-h-72 flex-1 items-center justify-center">
+      <div className="w-full max-w-xl text-center">
+        <div className="mx-auto mb-4 flex size-16 items-center justify-center rounded-full bg-muted">
+          {source.sourceKind === "podcast_transcript" ? (
+            <HeadphonesIcon className="size-7 text-muted-foreground" />
+          ) : (
+            <BookOpenIcon className="size-7 text-muted-foreground" />
+          )}
+        </div>
+        <h2 className="text-xl font-semibold text-pretty">Ask about {source.title}</h2>
+        <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-muted-foreground">
+          Pull out lessons, frameworks, examples, and reflection questions grounded in this source.
+        </p>
+        <div className="mt-5 grid gap-2 sm:grid-cols-3">
+          {prompts.map((prompt) => (
+            <Button
+              key={prompt}
+              type="button"
+              variant="outline"
+              className="h-auto min-h-16 whitespace-normal rounded-lg bg-background/80 text-wrap shadow-sm"
+              onClick={() => onPromptClick(prompt)}
+            >
+              {prompt}
+            </Button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CitationRow({ citations }: { citations: LearningCitation[] }) {
+  return (
+    <div className="mt-2 flex flex-wrap gap-1.5">
+      {citations.slice(0, 4).map((citation) => (
+        <Badge key={`${citation.sourceId}-${citation.chunkIndex}`} variant="outline">
+          {citation.label}
+        </Badge>
+      ))}
+    </div>
+  );
+}
+
+function LearningDetails({
+  compactMode,
+  showProfileRail,
+  source,
+  onCompactModeChange,
+  onCreate,
+  onDelete,
+  onPromptClick,
+  onShowProfileRailChange,
+}: {
+  compactMode: boolean;
+  showProfileRail: boolean;
+  source: LearningSource | null;
+  onCompactModeChange: (enabled: boolean) => void;
+  onCreate: () => void;
+  onDelete: (source: LearningSource) => void;
+  onPromptClick: (prompt: string) => void;
+  onShowProfileRailChange: (enabled: boolean) => void;
+}) {
+  const prompts = [
+    "Summarize this into a weekly practice plan.",
+    "What assumptions does this source challenge?",
+    "Give me reflection questions from this source.",
+    "Extract the strongest examples and stories.",
+  ];
+
+  return (
+    <div className="flex h-full min-h-0 flex-col bg-background/80">
+      <div className="flex h-16 shrink-0 items-center justify-between border-b px-4">
+        <div className="min-w-0">
+          <div className="truncate text-sm font-semibold">Self Development</div>
+          <div className="truncate text-xs text-muted-foreground">
+            {source?.title ?? "No source selected"}
+          </div>
+        </div>
+        <Button type="button" variant="outline" size="sm" onClick={onCreate}>
+          <PlusIcon />
+          Add
+        </Button>
+      </div>
+
+      <Tabs defaultValue="source" className="min-h-0 flex-1 gap-0">
+        <div className="border-b px-3 py-2">
+          <TabsList className="grid w-full grid-cols-3">
+            <TabsTrigger value="source">Source</TabsTrigger>
+            <TabsTrigger value="prompts">Prompts</TabsTrigger>
+            <TabsTrigger value="settings">Settings</TabsTrigger>
+          </TabsList>
+        </div>
+
+        <ScrollArea className="min-h-0 flex-1">
+          <TabsContent value="source" className="animate-panel-in mt-0 space-y-5 p-4">
+            {source ? (
+              <>
+                <div className="flex items-center gap-3">
+                  <div className="flex size-12 shrink-0 items-center justify-center rounded-full bg-muted">
+                    {source.sourceKind === "podcast_transcript" ? (
+                      <HeadphonesIcon className="size-5 text-muted-foreground" />
+                    ) : (
+                      <BookOpenIcon className="size-5 text-muted-foreground" />
+                    )}
+                  </div>
+                  <div className="min-w-0">
+                    <h2 className="truncate font-semibold">{source.title}</h2>
+                    <p className="text-sm text-muted-foreground">
+                      {sourceKindLabel(source.sourceKind)}
+                    </p>
+                  </div>
+                </div>
+                <div className="grid gap-2 text-sm">
+                  <SummaryMetric label="Chunks" value={String(source.chunkCount)} />
+                  <SummaryMetric label="Characters" value={source.sourceChars.toLocaleString()} />
+                  {source.pageCount ? (
+                    <SummaryMetric label="Pages" value={String(source.pageCount)} />
+                  ) : null}
+                </div>
+                <Alert>
+                  <SparklesIcon />
+                  <AlertTitle>Grounded study mode</AlertTitle>
+                  <AlertDescription>
+                    Answers retrieve from this selected source and include compact source hints.
+                  </AlertDescription>
+                </Alert>
+              </>
+            ) : (
+              <Alert>
+                <BookOpenIcon />
+                <AlertTitle>No source selected</AlertTitle>
+                <AlertDescription>
+                  Add a book PDF or podcast transcript to start.
+                </AlertDescription>
+              </Alert>
+            )}
+          </TabsContent>
+
+          <TabsContent value="prompts" className="animate-panel-in mt-0 space-y-4 p-4">
+            <div className="grid gap-2">
+              {prompts.map((prompt) => (
+                <Button
+                  key={prompt}
+                  type="button"
+                  variant="outline"
+                  className="hover-lift h-auto justify-start whitespace-normal rounded-lg py-3 text-left text-wrap"
+                  disabled={!source}
+                  onClick={() => onPromptClick(prompt)}
+                >
+                  <SparklesIcon />
+                  {prompt}
+                </Button>
+              ))}
+            </div>
+          </TabsContent>
+
+          <TabsContent value="settings" className="animate-panel-in mt-0 space-y-4 p-4">
+            <SettingSwitch
+              checked={compactMode}
+              description="Reduce spacing between chat messages."
+              label="Compact Chat"
+              onCheckedChange={onCompactModeChange}
+            />
+            <SettingSwitch
+              checked={showProfileRail}
+              description="Keep this source rail visible on wide screens."
+              label="Profile Rail"
+              onCheckedChange={onShowProfileRailChange}
+            />
+            {source ? (
+              <Button type="button" variant="destructive" onClick={() => onDelete(source)}>
+                <Trash2Icon />
+                Delete source
+              </Button>
+            ) : null}
+          </TabsContent>
+        </ScrollArea>
+      </Tabs>
+    </div>
+  );
+}
+
+function LearningSourceDialog({
+  apiKey,
+  open,
+  onOpenChange,
+  onSaved,
+}: {
+  apiKey?: string;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onSaved: (source: LearningSource) => void;
+}) {
+  const [kind, setKind] = useState<LearningSourceKind>("book_pdf");
+  const [title, setTitle] = useState("");
+  const [show, setShow] = useState("");
+  const [episode, setEpisode] = useState("");
+  const [transcript, setTranscript] = useState("");
+  const [file, setFile] = useState<File | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+
+  async function handleSave() {
+    setIsSaving(true);
+
+    try {
+      const response =
+        kind === "book_pdf"
+          ? await saveBookPdf()
+          : await savePodcastTranscript();
+      const data = (await response.json()) as LearningSourcesResponse;
+
+      if (!response.ok || !data.source) {
+        throw new Error(data.error ?? "Could not add source.");
+      }
+
+      toast.success("Learning source added.");
+      resetForm();
+      onSaved(data.source);
+    } catch (caughtError) {
+      toast.error(getErrorMessage(caughtError));
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function saveBookPdf() {
+    if (!file) {
+      throw new Error("Upload a PDF file.");
+    }
+
+    const body = new FormData();
+    body.set("file", file);
+
+    if (title.trim()) {
+      body.set("title", title.trim());
+    }
+
+    if (apiKey) {
+      body.set("apiKey", apiKey);
+    }
+
+    return fetch("/api/learning-sources", {
+      method: "POST",
+      body,
+    });
+  }
+
+  async function savePodcastTranscript() {
+    return fetch("/api/learning-sources", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        apiKey,
+        episode: episode.trim() || undefined,
+        show: show.trim() || undefined,
+        sourceKind: "podcast_transcript",
+        title: title.trim() || episode.trim() || "Podcast transcript",
+        transcript,
+      }),
+    });
+  }
+
+  function resetForm() {
+    setTitle("");
+    setShow("");
+    setEpisode("");
+    setTranscript("");
+    setFile(null);
+  }
+
+  const canSave =
+    kind === "book_pdf"
+      ? Boolean(file)
+      : transcript.trim().length >= 200 && Boolean(title.trim() || episode.trim());
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="flex max-h-[92dvh] flex-col overflow-hidden p-0 sm:max-w-2xl">
+        <DialogHeader className="border-b p-6 pb-4">
+          <DialogTitle>Add learning source</DialogTitle>
+          <DialogDescription>
+            Add a book PDF or podcast transcript for grounded self-development chat.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="min-h-0 flex-1 overflow-y-auto p-6">
+          <Tabs value={kind} onValueChange={(value) => setKind(value as LearningSourceKind)}>
+            <TabsList className="grid w-full grid-cols-2">
+              <TabsTrigger value="book_pdf">Book PDF</TabsTrigger>
+              <TabsTrigger value="podcast_transcript">Podcast Transcript</TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="book_pdf" className="mt-5 grid gap-4">
+              <div className="grid gap-1.5">
+                <Label htmlFor="learning-book-title">Title</Label>
+                <Input
+                  id="learning-book-title"
+                  value={title}
+                  onChange={(event) => setTitle(event.target.value)}
+                  placeholder="Optional; defaults to filename"
+                />
+              </div>
+              <div className="grid gap-1.5">
+                <Label htmlFor="learning-book-file">PDF file</Label>
+                <Input
+                  id="learning-book-file"
+                  type="file"
+                  accept=".pdf,application/pdf"
+                  onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                    setFile(event.target.files?.[0] ?? null)
+                  }
+                />
+                <p className="text-xs text-muted-foreground">
+                  Text-based PDFs up to 25 MB are supported. Scanned image PDFs need OCR first.
+                </p>
+              </div>
+            </TabsContent>
+
+            <TabsContent value="podcast_transcript" className="mt-5 grid gap-4">
+              <div className="grid gap-1.5">
+                <Label htmlFor="learning-podcast-title">Title</Label>
+                <Input
+                  id="learning-podcast-title"
+                  value={title}
+                  onChange={(event) => setTitle(event.target.value)}
+                  placeholder="Episode title"
+                />
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="grid gap-1.5">
+                  <Label htmlFor="learning-podcast-show">Show</Label>
+                  <Input
+                    id="learning-podcast-show"
+                    value={show}
+                    onChange={(event) => setShow(event.target.value)}
+                    placeholder="Optional"
+                  />
+                </div>
+                <div className="grid gap-1.5">
+                  <Label htmlFor="learning-podcast-episode">Episode</Label>
+                  <Input
+                    id="learning-podcast-episode"
+                    value={episode}
+                    onChange={(event) => setEpisode(event.target.value)}
+                    placeholder="Optional"
+                  />
+                </div>
+              </div>
+              <div className="grid gap-1.5">
+                <Label htmlFor="learning-transcript">Transcript</Label>
+                <Textarea
+                  id="learning-transcript"
+                  value={transcript}
+                  onChange={(event) => setTranscript(event.target.value)}
+                  placeholder="Paste the podcast transcript..."
+                  className="min-h-56"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Paste at least 200 characters and keep v1 transcripts under 500k characters.
+                </p>
+              </div>
+            </TabsContent>
+          </Tabs>
+        </div>
+
+        <DialogFooter className="border-t bg-popover p-4">
+          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button type="button" disabled={!canSave || isSaving} onClick={() => void handleSave()}>
+            {isSaving ? <Spinner /> : kind === "book_pdf" ? <BookOpenIcon /> : <HeadphonesIcon />}
+            Add source
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function PersonaEditorDialog({
+  apiKey,
   mode,
+  model,
   open,
   persona,
   onOpenChange,
   onSaved,
 }: {
+  apiKey?: string;
   mode: PersonaDialogMode;
+  model?: string;
   open: boolean;
   persona: PersonaOption | null;
   onOpenChange: (open: boolean) => void;
@@ -1786,22 +3093,43 @@ function PersonaEditorDialog({
     mode === "edit" && initialDraft ? "review" : "source",
   );
   const [sourceType, setSourceType] = useState<SourceType>("youtube-transcript");
+  const [generationMode, setGenerationMode] = useState<GenerationMode>(
+    initialDraft?.generation_mode ?? "detailed",
+  );
   const [sourceText, setSourceText] = useState("");
   const [sourceFile, setSourceFile] = useState<File | null>(null);
   const [draft, setDraft] = useState<PersonaData | null>(initialDraft);
   const [reviewForm, setReviewForm] = useState<PersonaReviewForm>(
     initialDraft ? personaToReviewForm(initialDraft) : createEmptyReviewForm(),
   );
+  const [generationMeta, setGenerationMeta] = useState<GenerationMeta | null>(
+    initialDraft?.generation_meta ?? null,
+  );
+  const [sourceMemory, setSourceMemory] = useState<SourceMemoryPayload | null>(null);
+  const [generationProgress, setGenerationProgress] = useState<GenerationProgress>("idle");
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
   async function handleGenerate() {
+    const progressTimers: Array<ReturnType<typeof setTimeout>> = [];
     setIsGenerating(true);
+    setGenerationMeta(null);
+    setSourceMemory(null);
+    setGenerationProgress("reading");
 
     try {
       const body = new FormData();
+      body.set("generationMode", generationMode);
       body.set("name", name.trim());
       body.set("sourceType", sourceType);
+
+      if (apiKey) {
+        body.set("apiKey", apiKey);
+      }
+
+      if (model) {
+        body.set("model", model);
+      }
 
       if (sourceFile) {
         body.set("file", sourceFile);
@@ -1809,24 +3137,45 @@ function PersonaEditorDialog({
         body.set("sourceText", sourceText);
       }
 
+      if (generationMode === "high_fidelity") {
+        progressTimers.push(
+          setTimeout(() => setGenerationProgress("splitting"), 500),
+          setTimeout(() => setGenerationProgress("analyzing"), 1300),
+          setTimeout(() => setGenerationProgress("merging"), 3600),
+          setTimeout(() => setGenerationProgress("examples"), 5200),
+        );
+      } else {
+        progressTimers.push(setTimeout(() => setGenerationProgress("examples"), 800));
+      }
+
       const response = await fetch("/api/persona/generate", {
         method: "POST",
         body,
       });
-      const data = (await response.json()) as { persona?: PersonaData; error?: string };
+      const data = (await response.json()) as {
+        meta?: GenerationMeta;
+        persona?: PersonaData;
+        sourceMemory?: SourceMemoryPayload;
+        error?: string;
+      };
 
       if (!response.ok || !data.persona) {
         throw new Error(data.error ?? "Could not generate persona.");
       }
 
       setDraft(data.persona);
+      setGenerationMeta(data.meta ?? data.persona.generation_meta ?? null);
+      setSourceMemory(data.sourceMemory ?? null);
       setReviewForm(personaToReviewForm(data.persona));
       setName(data.persona.name);
+      setGenerationProgress("ready");
       setStep("review");
       toast.success("Draft generated. Review it, then save to your library.");
     } catch (caughtError) {
+      setGenerationProgress("idle");
       toast.error(getErrorMessage(caughtError));
     } finally {
+      progressTimers.forEach((timer) => clearTimeout(timer));
       setIsGenerating(false);
     }
   }
@@ -1844,7 +3193,11 @@ function PersonaEditorDialog({
       const response = await fetch(endpoint, {
         method: mode === "edit" ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ persona: nextDraft }),
+        body: JSON.stringify({
+          persona: nextDraft,
+          sourceMemory,
+          apiKey: apiKey ? apiKey.trim() || undefined : undefined,
+        }),
       });
       const data = (await response.json()) as { persona?: PersonaOption; error?: string };
 
@@ -1870,7 +3223,7 @@ function PersonaEditorDialog({
         <DialogHeader className="border-b p-6 pb-4">
           <DialogTitle>{mode === "edit" ? "Edit persona" : "Create persona"}</DialogTitle>
           <DialogDescription>
-            Paste a transcript or upload a .txt file. Only the compact persona draft is saved.
+            Paste a transcript or upload a .txt file. The draft stores style rules, not raw source text.
           </DialogDescription>
         </DialogHeader>
 
@@ -1913,6 +3266,14 @@ function PersonaEditorDialog({
                 <NativeSelectOption value="other">Other text</NativeSelectOption>
               </NativeSelect>
             </div>
+            <div className="space-y-2">
+              <Label>Capture depth</Label>
+              <FidelityModeCards
+                disabled={isGenerating}
+                value={generationMode}
+                onChange={setGenerationMode}
+              />
+            </div>
             <div className="space-y-1.5">
               <Label htmlFor="source-file">Upload .txt file</Label>
               <Input
@@ -1934,6 +3295,9 @@ function PersonaEditorDialog({
                 className="min-h-40"
               />
             </div>
+            {isGenerating ? (
+              <GenerationProgressPanel progress={generationProgress} mode={generationMode} />
+            ) : null}
           </div>
         ) : (
           <>
@@ -1950,7 +3314,9 @@ function PersonaEditorDialog({
                         {reviewForm.tagline || "Private custom persona"}
                       </div>
                     </div>
-                    <Badge variant="secondary">Private custom persona</Badge>
+                    <Badge variant="secondary">
+                      {reviewForm.generationMode.replace("_", " ")}
+                    </Badge>
                   </div>
                   <div className="mt-3 flex flex-wrap gap-2">
                     {lineStringToArray(reviewForm.topics)
@@ -1962,76 +3328,175 @@ function PersonaEditorDialog({
                       ))}
                   </div>
                 </div>
+                <GenerationSummaryPanel
+                  meta={generationMeta ?? draft.generation_meta ?? null}
+                  persona={draft}
+                />
 
-                <div className="grid gap-3">
-                  <DraftField
-                    name="review-name"
-                    label="Name"
-                    value={reviewForm.name}
-                    onChange={(value) => setReviewField("name", value)}
-                  />
-                  <DraftField
-                    name="review-tagline"
-                    label="Tagline"
-                    value={reviewForm.tagline}
-                    onChange={(value) => setReviewField("tagline", value)}
-                  />
-                  <DraftArea
-                    name="review-bio"
-                    label="Bio"
-                    value={reviewForm.bio}
-                    rows={2}
-                    onChange={(value) => setReviewField("bio", value)}
-                  />
-                  <DraftArea
-                    name="review-identity"
-                    label="Identity"
-                    value={reviewForm.identity}
-                    rows={3}
-                    onChange={(value) => setReviewField("identity", value)}
-                  />
-                <DraftArea
-                  name="review-topics"
-                  label="Topics"
-                  value={reviewForm.topics}
-                  rows={3}
-                  onChange={(value) => setReviewField("topics", value)}
-                />
-                <DraftArea
-                  name="review-starter-prompts"
-                  label="Starter prompts"
-                  value={reviewForm.starterPrompts}
-                  rows={3}
-                  onChange={(value) => setReviewField("starterPrompts", value)}
-                />
-                <DraftArea
-                  name="review-tone-traits"
-                  label="Tone traits"
-                  value={reviewForm.toneTraits}
-                  rows={3}
-                  onChange={(value) => setReviewField("toneTraits", value)}
-                />
-                <DraftArea
-                  name="review-catchphrases"
-                  label="Catchphrases"
-                  value={reviewForm.catchphrases}
-                  rows={3}
-                  onChange={(value) => setReviewField("catchphrases", value)}
-                />
-                <DraftField
-                  name="review-teaching-pattern"
-                  label="Response pattern"
-                  value={reviewForm.teachingPattern}
-                  onChange={(value) => setReviewField("teachingPattern", value)}
-                />
-                <DraftArea
-                  name="review-few-shot"
-                  label="Few-shot examples"
-                  value={reviewForm.fewShot}
-                  rows={4}
-                  onChange={(value) => setReviewField("fewShot", value)}
-                />
-                </div>
+                <Tabs defaultValue="overview" className="gap-4">
+                  <TabsList className="grid w-full grid-cols-4">
+                    <TabsTrigger value="overview">Overview</TabsTrigger>
+                    <TabsTrigger value="voice">Voice</TabsTrigger>
+                    <TabsTrigger value="behavior">Behavior</TabsTrigger>
+                    <TabsTrigger value="examples">Examples</TabsTrigger>
+                  </TabsList>
+
+                  <TabsContent value="overview" className="mt-0 grid gap-3">
+                    <DraftField
+                      name="review-name"
+                      label="Name"
+                      value={reviewForm.name}
+                      onChange={(value) => setReviewField("name", value)}
+                    />
+                    <DraftField
+                      name="review-tagline"
+                      label="Tagline"
+                      value={reviewForm.tagline}
+                      onChange={(value) => setReviewField("tagline", value)}
+                    />
+                    <DraftArea
+                      name="review-bio"
+                      label="Bio"
+                      value={reviewForm.bio}
+                      rows={3}
+                      onChange={(value) => setReviewField("bio", value)}
+                    />
+                    <DraftArea
+                      name="review-identity"
+                      label="Identity"
+                      value={reviewForm.identity}
+                      rows={5}
+                      onChange={(value) => setReviewField("identity", value)}
+                    />
+                    <DraftArea
+                      name="review-topics"
+                      label="Topics"
+                      value={reviewForm.topics}
+                      rows={3}
+                      onChange={(value) => setReviewField("topics", value)}
+                    />
+                    <DraftArea
+                      name="review-starter-prompts"
+                      label="Starter prompts"
+                      value={reviewForm.starterPrompts}
+                      rows={3}
+                      onChange={(value) => setReviewField("starterPrompts", value)}
+                    />
+                  </TabsContent>
+
+                  <TabsContent value="voice" className="mt-0 grid gap-3">
+                    <DraftArea
+                      name="review-voice-profile"
+                      label="Voice profile"
+                      value={reviewForm.voiceProfile}
+                      rows={5}
+                      onChange={(value) => setReviewField("voiceProfile", value)}
+                    />
+                    <DraftArea
+                      name="review-language-profile"
+                      label="Language profile"
+                      value={reviewForm.languageProfile}
+                      rows={4}
+                      onChange={(value) => setReviewField("languageProfile", value)}
+                    />
+                    <DraftArea
+                      name="review-phrase-bank"
+                      label="Phrase bank"
+                      value={reviewForm.phraseBank}
+                      rows={6}
+                      onChange={(value) => setReviewField("phraseBank", value)}
+                    />
+                    <DraftArea
+                      name="review-tone-traits"
+                      label="Tone traits"
+                      value={reviewForm.toneTraits}
+                      rows={3}
+                      onChange={(value) => setReviewField("toneTraits", value)}
+                    />
+                    <DraftArea
+                      name="review-catchphrases"
+                      label="Catchphrases"
+                      value={reviewForm.catchphrases}
+                      rows={3}
+                      onChange={(value) => setReviewField("catchphrases", value)}
+                    />
+                  </TabsContent>
+
+                  <TabsContent value="behavior" className="mt-0 grid gap-3">
+                    <DraftArea
+                      name="review-reasoning-profile"
+                      label="Reasoning profile"
+                      value={reviewForm.reasoningProfile}
+                      rows={5}
+                      onChange={(value) => setReviewField("reasoningProfile", value)}
+                    />
+                    <DraftArea
+                      name="review-interaction-rules"
+                      label="Interaction rules"
+                      value={reviewForm.interactionRules}
+                      rows={5}
+                      onChange={(value) => setReviewField("interactionRules", value)}
+                    />
+                    <DraftArea
+                      name="review-addressing-rules"
+                      label="Addressing rules"
+                      value={reviewForm.addressingRules}
+                      rows={3}
+                      onChange={(value) => setReviewField("addressingRules", value)}
+                    />
+                    <DraftField
+                      name="review-teaching-pattern"
+                      label="Response pattern"
+                      value={reviewForm.teachingPattern}
+                      onChange={(value) => setReviewField("teachingPattern", value)}
+                    />
+                    <DraftArea
+                      name="review-do-rules"
+                      label="Do rules"
+                      value={reviewForm.doRules}
+                      rows={4}
+                      onChange={(value) => setReviewField("doRules", value)}
+                    />
+                    <DraftArea
+                      name="review-dont-rules"
+                      label="Don't rules"
+                      value={reviewForm.dontRules}
+                      rows={4}
+                      onChange={(value) => setReviewField("dontRules", value)}
+                    />
+                  </TabsContent>
+
+                  <TabsContent value="examples" className="mt-0 grid gap-3">
+                    <Alert>
+                      <SparklesIcon />
+                      <AlertTitle>High-fidelity fields</AlertTitle>
+                      <AlertDescription>
+                        Use one line per example. Scenario examples use: scenario | question | answer.
+                      </AlertDescription>
+                    </Alert>
+                    <DraftArea
+                      name="review-scenario-examples"
+                      label="Scenario examples"
+                      value={reviewForm.scenarioExamples}
+                      rows={7}
+                      onChange={(value) => setReviewField("scenarioExamples", value)}
+                    />
+                    <DraftArea
+                      name="review-few-shot"
+                      label="Few-shot examples"
+                      value={reviewForm.fewShot}
+                      rows={6}
+                      onChange={(value) => setReviewField("fewShot", value)}
+                    />
+                    <DraftArea
+                      name="review-style-confidence"
+                      label="Style confidence notes"
+                      value={reviewForm.styleConfidence}
+                      rows={4}
+                      onChange={(value) => setReviewField("styleConfidence", value)}
+                    />
+                  </TabsContent>
+                </Tabs>
               </>
             ) : (
               <div className="flex min-h-72 flex-col items-center justify-center rounded-3xl border border-dashed p-8 text-center">
@@ -2084,6 +3549,161 @@ function PersonaEditorDialog({
   function setReviewField(field: keyof PersonaReviewForm, value: string) {
     setReviewForm((currentForm) => ({ ...currentForm, [field]: value }));
   }
+}
+
+function FidelityModeCards({
+  disabled,
+  onChange,
+  value,
+}: {
+  disabled: boolean;
+  onChange: (mode: GenerationMode) => void;
+  value: GenerationMode;
+}) {
+  const modes: Array<{
+    description: string;
+    mode: GenerationMode;
+    title: string;
+    stats: string;
+  }> = [
+    {
+      description: "Fast one-pass extraction for a quick editable draft.",
+      mode: "compact",
+      stats: "Fast / low tokens / short notes",
+      title: "Compact",
+    },
+    {
+      description: "Richer voice, behavior, rules, and examples for most files.",
+      mode: "detailed",
+      stats: "Balanced / richer draft / 2k+ words",
+      title: "Detailed",
+    },
+    {
+      description: "Deep style capture plus searchable source memory for grounded replies.",
+      mode: "high_fidelity",
+      stats: "Slower / embeddings / remembers source",
+      title: "High Fidelity",
+    },
+  ];
+
+  return (
+    <div className="grid gap-2 md:grid-cols-3">
+      {modes.map((mode) => (
+        <button
+          key={mode.mode}
+          type="button"
+          disabled={disabled}
+          onClick={() => onChange(mode.mode)}
+          className={cn(
+            "rounded-lg border bg-background p-3 text-left transition hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60",
+            value === mode.mode && "border-primary bg-muted",
+          )}
+        >
+          <span className="block text-sm font-semibold">{mode.title}</span>
+          <span className="mt-1 block text-xs leading-5 text-muted-foreground">
+            {mode.description}
+          </span>
+          <span className="mt-3 block text-[11px] font-medium text-muted-foreground">
+            {mode.stats}
+          </span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function GenerationProgressPanel({
+  mode,
+  progress,
+}: {
+  mode: GenerationMode;
+  progress: GenerationProgress;
+}) {
+  const steps: Array<{ key: GenerationProgress; label: string }> = [
+    { key: "reading", label: "Reading source" },
+    { key: "splitting", label: "Splitting chunks" },
+    { key: "analyzing", label: "Analyzing chunks" },
+    { key: "merging", label: "Merging profile" },
+    { key: "examples", label: "Building examples" },
+    { key: "ready", label: "Ready to review" },
+  ];
+  const activeIndex = Math.max(
+    0,
+    steps.findIndex((step) => step.key === progress),
+  );
+  const visibleSteps = mode === "high_fidelity"
+    ? steps
+    : steps.filter((step) => step.key === "reading" || step.key === "examples" || step.key === "ready");
+
+  return (
+    <div className="rounded-lg border bg-muted/35 p-4">
+      <div className="flex items-center gap-2 text-sm font-medium">
+        <Spinner className="size-4" />
+        Generating {mode.replace("_", " ")} persona
+      </div>
+      <div className="mt-3 grid gap-2">
+        {visibleSteps.map((step) => {
+          const index = steps.findIndex((item) => item.key === step.key);
+          const isDone = index < activeIndex || progress === "ready";
+          const isActive = step.key === progress;
+
+          return (
+            <div
+              key={step.key}
+              className={cn(
+                "flex items-center gap-2 text-xs text-muted-foreground",
+                (isActive || isDone) && "text-foreground",
+              )}
+            >
+              <span
+                className={cn(
+                  "size-2 rounded-full bg-muted-foreground/40",
+                  isDone && "bg-emerald-500",
+                  isActive && "animate-soft-pulse bg-primary",
+                )}
+              />
+              {step.label}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function GenerationSummaryPanel({
+  meta,
+  persona,
+}: {
+  meta: GenerationMeta | null;
+  persona: PersonaData;
+}) {
+  const scenarioCount = persona.scenario_examples?.length ?? 0;
+  const confidenceCount = persona.style_confidence?.length ?? 0;
+
+  return (
+    <div className="mb-5 grid gap-2 rounded-lg border bg-background p-3 text-sm sm:grid-cols-5">
+      <SummaryMetric label="Mode" value={(meta?.generationMode ?? persona.generation_mode ?? "compact").replace("_", " ")} />
+      <SummaryMetric label="Chunks" value={String(meta?.chunkCount ?? 1)} />
+      <SummaryMetric label="Memory" value={String(meta?.memoryChunkCount ?? 0)} />
+      <SummaryMetric label="Confidence notes" value={String(confidenceCount)} />
+      <SummaryMetric label="Scenarios" value={String(scenarioCount)} />
+      {meta?.sourceTruncated ? (
+        <div className="text-xs text-amber-600 sm:col-span-5">
+          Source was truncated or chunk-limited for this draft.
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function SummaryMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <div className="text-[11px] font-medium uppercase text-muted-foreground">{label}</div>
+      <div className="mt-1 truncate font-medium capitalize">{value}</div>
+    </div>
+  );
 }
 
 function DraftField({
@@ -2169,10 +3789,20 @@ function PersonaAvatar({
 
 function createEmptyReviewForm(): PersonaReviewForm {
   return {
+    generationMode: "detailed",
     name: "",
     tagline: "",
     bio: "",
     identity: "",
+    voiceProfile: "",
+    languageProfile: "",
+    reasoningProfile: "",
+    interactionRules: "",
+    addressingRules:
+      "Speak directly to the signed-in user in a one-on-one conversation. Do not address them as chat, viewers, subscribers, or audience.",
+    phraseBank: "",
+    doRules: "",
+    dontRules: "",
     topics: "",
     starterPrompts: "",
     toneTraits: "",
@@ -2180,21 +3810,36 @@ function createEmptyReviewForm(): PersonaReviewForm {
     teachingPattern:
       "understand the question -> answer in style -> give a practical next step",
     fewShot: "",
+    scenarioExamples: "",
+    styleConfidence: "",
   };
 }
 
 function personaToReviewForm(persona: PersonaData): PersonaReviewForm {
   return {
+    generationMode: persona.generation_mode ?? "compact",
     name: persona.name,
     tagline: persona.tagline ?? "",
     bio: persona.bio ?? "",
     identity: persona.identity,
+    voiceProfile: persona.voice_profile ?? "",
+    languageProfile: persona.language_profile ?? "",
+    reasoningProfile: persona.reasoning_profile ?? "",
+    interactionRules: persona.interaction_rules ?? "",
+    addressingRules: persona.addressing_rules ?? "",
+    phraseBank: phraseBankToString(persona.phrase_bank),
+    doRules: (persona.do_rules ?? []).join("\n"),
+    dontRules: (persona.dont_rules ?? []).join("\n"),
     topics: (persona.topics ?? []).join("\n"),
     starterPrompts: (persona.starter_prompts ?? []).join("\n"),
     toneTraits: persona.tone_traits.join("\n"),
     catchphrases: persona.catchphrases.join("\n"),
     teachingPattern: persona.teaching_pattern,
     fewShot: persona.few_shot.map((item) => `${item.q} | ${item.a}`).join("\n"),
+    scenarioExamples: (persona.scenario_examples ?? [])
+      .map((item) => `${item.scenario} | ${item.q} | ${item.a}`)
+      .join("\n"),
+    styleConfidence: (persona.style_confidence ?? []).join("\n"),
   };
 }
 
@@ -2204,25 +3849,36 @@ function reviewFormToPersonaData(
 ): PersonaData {
   return {
     ...previousDraft,
+    generation_mode: form.generationMode,
     name: form.name.trim() || previousDraft.name,
     tagline: form.tagline.trim() || "Custom persona",
     bio: form.bio.trim() || previousDraft.bio || previousDraft.identity,
     identity: form.identity.trim() || previousDraft.identity,
+    voice_profile: form.voiceProfile.trim() || undefined,
+    language_profile: form.languageProfile.trim() || undefined,
+    reasoning_profile: form.reasoningProfile.trim() || undefined,
+    interaction_rules: form.interactionRules.trim() || undefined,
+    addressing_rules: form.addressingRules.trim() || undefined,
+    phrase_bank: stringToPhraseBank(form.phraseBank),
+    do_rules: lineStringToArray(form.doRules, 16),
+    dont_rules: lineStringToArray(form.dontRules, 16),
     topics: lineStringToArray(form.topics),
-    starter_prompts: lineStringToArray(form.starterPrompts).slice(0, 4),
+    starter_prompts: lineStringToArray(form.starterPrompts, 6),
     tone_traits: lineStringToArray(form.toneTraits),
     catchphrases: lineStringToArray(form.catchphrases),
     teaching_pattern: form.teachingPattern.trim() || previousDraft.teaching_pattern,
     few_shot: fewShotStringToArray(form.fewShot),
+    scenario_examples: scenarioExamplesStringToArray(form.scenarioExamples),
+    style_confidence: lineStringToArray(form.styleConfidence, 12),
   };
 }
 
-function lineStringToArray(value: string) {
+function lineStringToArray(value: string, maxItems = 12) {
   return value
     .split(/\n|,/)
     .map((item) => item.trim())
     .filter(Boolean)
-    .slice(0, 12);
+    .slice(0, maxItems);
 }
 
 function fewShotStringToArray(value: string) {
@@ -2231,6 +3887,62 @@ function fewShotStringToArray(value: string) {
     .map((line) => parseFewShotLine(line))
     .filter((item): item is { q: string; a: string } => Boolean(item))
     .slice(0, 8);
+}
+
+function scenarioExamplesStringToArray(value: string) {
+  return value
+    .split("\n")
+    .map((line) => {
+      const [scenario, q, ...answerParts] = line.split("|");
+      const a = answerParts.join("|");
+
+      return scenario?.trim() && q?.trim() && a?.trim()
+        ? { scenario: scenario.trim(), q: q.trim(), a: a.trim() }
+        : null;
+    })
+    .filter((item): item is { scenario: string; q: string; a: string } => Boolean(item))
+    .slice(0, 10);
+}
+
+function phraseBankToString(phraseBank: PersonaData["phrase_bank"]) {
+  if (!phraseBank) {
+    return "";
+  }
+
+  return (["greetings", "transitions", "encouragement", "corrections", "closings"] as const)
+    .map((key) => {
+      const phrases = phraseBank[key] ?? [];
+
+      return phrases.length ? `${key}: ${phrases.join(", ")}` : "";
+    })
+    .filter(Boolean)
+    .join("\n");
+}
+
+function stringToPhraseBank(value: string): PersonaData["phrase_bank"] {
+  const bank: NonNullable<PersonaData["phrase_bank"]> = {};
+
+  for (const line of value.split("\n")) {
+    const [rawKey, ...rawPhrases] = line.split(":");
+    const key = rawKey.trim() as keyof NonNullable<PersonaData["phrase_bank"]>;
+
+    if (!["greetings", "transitions", "encouragement", "corrections", "closings"].includes(key)) {
+      continue;
+    }
+
+    const phrases = rawPhrases
+      .join(":")
+      .split(",")
+      .map((phrase) => phrase.trim())
+      .filter(Boolean)
+      .slice(0, 14);
+
+    if (phrases.length) {
+      bank[key] = phrases;
+    }
+  }
+
+  return Object.keys(bank).length ? bank : undefined;
 }
 
 function parseFewShotLine(line: string) {
@@ -2254,6 +3966,11 @@ function personaToDraft(persona: PersonaOption): PersonaData {
     topics: persona.topics ?? [],
     starter_prompts: persona.starterPrompts ?? [],
     few_shot: [],
+    generation_mode: "compact",
+    do_rules: [],
+    dont_rules: [],
+    scenario_examples: [],
+    style_confidence: [],
     source_count: persona.sourceCount ?? 1,
   };
 }
@@ -2265,6 +3982,48 @@ async function readJsonError(response: Response) {
   } catch {
     return null;
   }
+}
+
+function readLearningCitations(value: string | null): LearningCitation[] {
+  if (!value) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(decodeURIComponent(value)) as unknown;
+
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    return parsed
+      .map((item): LearningCitation | null => {
+        if (typeof item !== "object" || item === null) {
+          return null;
+        }
+
+        const citation = item as Partial<LearningCitation>;
+
+        return typeof citation.label === "string" &&
+          typeof citation.sourceId === "string" &&
+          typeof citation.chunkIndex === "number"
+          ? {
+              chunkIndex: citation.chunkIndex,
+              label: citation.label,
+              pageEnd: citation.pageEnd ?? null,
+              pageStart: citation.pageStart ?? null,
+              sourceId: citation.sourceId,
+            }
+          : null;
+      })
+      .filter((item): item is LearningCitation => Boolean(item));
+  } catch {
+    return [];
+  }
+}
+
+function sourceKindLabel(kind: LearningSourceKind) {
+  return kind === "book_pdf" ? "Book PDF" : "Podcast transcript";
 }
 
 async function authApiRequest(path: string, body: Record<string, unknown>) {

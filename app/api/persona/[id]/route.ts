@@ -3,6 +3,10 @@ import { and, eq, inArray } from "drizzle-orm";
 import { requireUser } from "@/lib/auth-utils";
 import { messages, personas, sessions } from "@/lib/db/schema";
 import { buildSystemPrompt } from "@/lib/personas";
+import {
+  cleanSourceMemoryPayload,
+  storePersonaSourceMemory,
+} from "@/lib/personas/sourceMemory";
 import { sanitizePersonaData } from "@/lib/personas/validation";
 
 export async function PATCH(
@@ -32,6 +36,17 @@ export async function PATCH(
     return Response.json({ error: "Invalid persona draft." }, { status: 400 });
   }
 
+  const sourceMemory =
+    typeof body === "object" && body !== null && "sourceMemory" in body
+      ? cleanSourceMemoryPayload((body as { sourceMemory: unknown }).sourceMemory)
+      : null;
+  const apiKey =
+    typeof body === "object" &&
+    body !== null &&
+    "apiKey" in body &&
+    typeof (body as { apiKey?: unknown }).apiKey === "string"
+      ? ((body as { apiKey: string }).apiKey.trim() || undefined)
+      : undefined;
   const { id } = await context.params;
   const { db } = await import("@/lib/db");
   const [updatedPersona] = await db
@@ -58,6 +73,15 @@ export async function PATCH(
 
   if (!updatedPersona) {
     return Response.json({ error: "Persona not found." }, { status: 404 });
+  }
+
+  if (sourceMemory) {
+    await storePersonaSourceMemory({
+      apiKey,
+      memory: sourceMemory,
+      personaId: updatedPersona.id,
+      userId: user.id,
+    });
   }
 
   return Response.json({ persona: toPersonaSummary(updatedPersona) });

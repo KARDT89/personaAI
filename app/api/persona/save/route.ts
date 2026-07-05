@@ -1,6 +1,10 @@
 import { requireUser } from "@/lib/auth-utils";
 import { personas } from "@/lib/db/schema";
 import { buildSystemPrompt, type PersonaData } from "@/lib/personas";
+import {
+  cleanSourceMemoryPayload,
+  storePersonaSourceMemory,
+} from "@/lib/personas/sourceMemory";
 import { sanitizePersonaData } from "@/lib/personas/validation";
 
 export async function POST(req: Request) {
@@ -24,6 +28,9 @@ export async function POST(req: Request) {
     return Response.json({ error: "Invalid persona draft." }, { status: 400 });
   }
 
+  const sourceMemory = parseSourceMemory(body);
+  const apiKey = parseApiKey(body);
+
   const id = `custom-${crypto.randomUUID()}`;
   const { db } = await import("@/lib/db");
   const [savedPersona] = await db
@@ -43,6 +50,15 @@ export async function POST(req: Request) {
       sourceCount: persona.source_count ?? 1,
     })
     .returning();
+
+  if (sourceMemory) {
+    await storePersonaSourceMemory({
+      apiKey,
+      memory: sourceMemory,
+      personaId: savedPersona.id,
+      userId: user.id,
+    });
+  }
 
   return Response.json({
     persona: {
@@ -66,4 +82,21 @@ function parsePersona(body: unknown): PersonaData | null {
   }
 
   return sanitizePersonaData((body as { persona: unknown }).persona);
+}
+
+function parseSourceMemory(body: unknown) {
+  if (typeof body !== "object" || body === null || !("sourceMemory" in body)) {
+    return null;
+  }
+
+  return cleanSourceMemoryPayload((body as { sourceMemory: unknown }).sourceMemory);
+}
+
+function parseApiKey(body: unknown) {
+  if (typeof body !== "object" || body === null || !("apiKey" in body)) {
+    return undefined;
+  }
+
+  const apiKey = (body as { apiKey?: unknown }).apiKey;
+  return typeof apiKey === "string" ? apiKey.trim() || undefined : undefined;
 }

@@ -16,9 +16,14 @@ type ChatRequest = {
 
 const OPENROUTER_CHAT_COMPLETIONS_URL =
   "https://openrouter.ai/api/v1/chat/completions";
+const OPENROUTER_EMBEDDINGS_URL = "https://openrouter.ai/api/v1/embeddings";
 
 export function getOpenRouterModel() {
   return process.env.OPENROUTER_MODEL ?? "openai/gpt-4o";
+}
+
+export function getOpenRouterEmbeddingModel() {
+  return process.env.OPENROUTER_EMBEDDING_MODEL ?? "openai/text-embedding-3-small";
 }
 
 export async function createChatCompletion(request: ChatRequest) {
@@ -55,6 +60,55 @@ export async function createChatCompletionText(request: ChatRequest) {
   };
 
   return data.choices?.[0]?.message?.content?.trim() ?? "";
+}
+
+export async function createEmbedding({
+  apiKey,
+  input,
+  model,
+}: {
+  apiKey?: string;
+  input: string;
+  model?: string;
+}) {
+  const response = await fetch(OPENROUTER_EMBEDDINGS_URL, {
+    method: "POST",
+    headers: getHeaders(apiKey),
+    body: JSON.stringify({
+      model: model ?? getOpenRouterEmbeddingModel(),
+      input,
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(
+      `OpenRouter embedding request failed with ${response.status}: ${errorText}`,
+    );
+  }
+
+  const data = (await response.json()) as {
+    data?: Array<{ embedding?: number[] }>;
+  };
+  const embedding = data.data?.[0]?.embedding;
+
+  if (!embedding?.length) {
+    throw new Error("OpenRouter returned an empty embedding.");
+  }
+
+  return normalizeEmbeddingDimensions(embedding, 1536);
+}
+
+function normalizeEmbeddingDimensions(embedding: number[], dimensions: number) {
+  if (embedding.length === dimensions) {
+    return embedding;
+  }
+
+  if (embedding.length > dimensions) {
+    return embedding.slice(0, dimensions);
+  }
+
+  return [...embedding, ...Array.from({ length: dimensions - embedding.length }, () => 0)];
 }
 
 function getHeaders(apiKeyOverride?: string) {
