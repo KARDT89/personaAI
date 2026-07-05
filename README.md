@@ -1,12 +1,12 @@
-# PersonaAI
+# Mindprint
 
-PersonaAI is a private AI workspace for building chat personas and study libraries from real source material. It lets you chat with built-in coding mentors, generate custom personas from transcripts or conversations, upload study sources, and ask source-grounded questions with citations.
+Mindprint is a private AI workspace for building chat personas and study libraries from real source material. It lets you chat with built-in coding mentors, generate custom personas from transcripts or conversations, upload study sources, and ask source-grounded questions with citations.
 
 The app is built for people who want AI conversations that are less generic and more grounded in actual material: transcripts, WhatsApp-style chats, PDFs, podcast notes, and curated persona profiles.
 
 ## What It Does
 
-PersonaAI has two main workspaces:
+Mindprint has two main workspaces:
 
 - **Persona Studio**: chat with built-in mentors or generate your own persona from source text.
 - **Study Library**: upload PDFs or paste podcast transcripts, then chat with the source using retrieval and citations.
@@ -82,13 +82,13 @@ cp .env.example .env
 3. Fill in at least:
 
 ```env
-DATABASE_URL=postgres://postgres:postgres@localhost:5432/personaai
+DATABASE_URL=postgres://postgres:postgres@localhost:5432/mindprint
 BETTER_AUTH_SECRET=replace-with-a-long-random-secret
 BETTER_AUTH_URL=http://localhost:3000
 OPENROUTER_API_KEY=sk-or-your-key
 OPENROUTER_MODEL=openai/gpt-4o
 OPENROUTER_SITE_URL=http://localhost:3000
-OPENROUTER_APP_TITLE=PersonaAI
+OPENROUTER_APP_TITLE=Mindprint
 ```
 
 4. Run database migrations:
@@ -130,7 +130,7 @@ Open `http://localhost:3000`.
 
 ## AI Key and Model Behavior
 
-PersonaAI supports two AI usage modes in Settings:
+Mindprint supports two AI usage modes in Settings:
 
 - **Use App API Key**: requests use the server-configured `OPENROUTER_API_KEY` and the server default model, expected to be `openai/gpt-4o`.
 - **Use My API Key**: users store an OpenRouter key in their browser and can choose from curated model options or enter a custom OpenRouter model ID.

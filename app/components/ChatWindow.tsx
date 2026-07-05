@@ -255,6 +255,22 @@ const FALLBACK_PERSONAS: PersonaOption[] = [
 ];
 const DEFAULT_CHAT_MODEL = "openai/gpt-4o";
 const CUSTOM_MODEL_VALUE = "__custom-openrouter-model__";
+const STORAGE_KEYS = {
+  apiKeyMode: "mindprint-api-key-mode",
+  compactMode: "mindprint-compact-mode",
+  model: "mindprint-model",
+  modelMode: "mindprint-model-mode",
+  openrouterKey: "mindprint-openrouter-key",
+  showProfileRail: "mindprint-show-profile-rail",
+} as const;
+const LEGACY_STORAGE_KEYS = {
+  apiKeyMode: "persona-ai-api-key-mode",
+  compactMode: "persona-ai-compact-mode",
+  model: "persona-ai-model",
+  modelMode: "persona-ai-model-mode",
+  openrouterKey: "persona-ai-openrouter-key",
+  showProfileRail: "persona-ai-show-profile-rail",
+} as const;
 
 export function ChatWindow() {
   const { data: authSession, refetch: refetchAuthSession } = authClient.useSession();
@@ -294,23 +310,23 @@ export function ChatWindow() {
   const [isDeletingLearningSource, setIsDeletingLearningSource] = useState(false);
   const [isDeletingLearningSession, setIsDeletingLearningSession] = useState(false);
   const [isCompactMode, setIsCompactMode] = useState(() =>
-    readStoredSetting("persona-ai-compact-mode") === "true",
+    readStoredSetting(STORAGE_KEYS.compactMode, LEGACY_STORAGE_KEYS.compactMode) === "true",
   );
   const [showProfileRail, setShowProfileRail] = useState(() =>
-    readStoredSetting("persona-ai-show-profile-rail") !== "false",
+    readStoredSetting(STORAGE_KEYS.showProfileRail, LEGACY_STORAGE_KEYS.showProfileRail) !== "false",
   );
   const [apiKeyMode, setApiKeyMode] = useState<ApiKeyMode>(() =>
-    readStoredSetting("persona-ai-api-key-mode") === "personal" ? "personal" : "app",
+    readStoredSetting(STORAGE_KEYS.apiKeyMode, LEGACY_STORAGE_KEYS.apiKeyMode) === "personal" ? "personal" : "app",
   );
   const [appApiKeyAvailable, setAppApiKeyAvailable] = useState(true);
   const [personalApiKey, setPersonalApiKey] = useState(
-    () => readStoredSetting("persona-ai-openrouter-key") ?? "",
+    () => readStoredSetting(STORAGE_KEYS.openrouterKey, LEGACY_STORAGE_KEYS.openrouterKey) ?? "",
   );
   const [preferredModel, setPreferredModel] = useState(
-    () => readStoredSetting("persona-ai-model") ?? DEFAULT_CHAT_MODEL,
+    () => readStoredSetting(STORAGE_KEYS.model, LEGACY_STORAGE_KEYS.model) ?? DEFAULT_CHAT_MODEL,
   );
   const [modelSelectionMode, setModelSelectionMode] = useState<ModelSelectionMode>(() =>
-    readStoredSetting("persona-ai-model-mode") === "custom" ? "custom" : "curated",
+    readStoredSetting(STORAGE_KEYS.modelMode, LEGACY_STORAGE_KEYS.modelMode) === "custom" ? "custom" : "curated",
   );
   const [appDefaultModel, setAppDefaultModel] = useState(DEFAULT_CHAT_MODEL);
   const [modelOptions, setModelOptions] = useState<ModelOptionGroup[]>([]);
@@ -328,15 +344,15 @@ export function ChatWindow() {
   const requestModel = apiKeyMode === "personal" ? preferredModel.trim() || undefined : undefined;
 
   useEffect(() => {
-    localStorage.setItem("persona-ai-compact-mode", String(isCompactMode));
+    localStorage.setItem(STORAGE_KEYS.compactMode, String(isCompactMode));
   }, [isCompactMode]);
 
   useEffect(() => {
-    localStorage.setItem("persona-ai-show-profile-rail", String(showProfileRail));
+    localStorage.setItem(STORAGE_KEYS.showProfileRail, String(showProfileRail));
   }, [showProfileRail]);
 
   useEffect(() => {
-    localStorage.setItem("persona-ai-api-key-mode", apiKeyMode);
+    localStorage.setItem(STORAGE_KEYS.apiKeyMode, apiKeyMode);
   }, [apiKeyMode]);
 
   useEffect(() => {
@@ -352,22 +368,22 @@ export function ChatWindow() {
 
   useEffect(() => {
     if (personalApiKey.trim()) {
-      localStorage.setItem("persona-ai-openrouter-key", personalApiKey.trim());
+      localStorage.setItem(STORAGE_KEYS.openrouterKey, personalApiKey.trim());
     } else {
-      localStorage.removeItem("persona-ai-openrouter-key");
+      localStorage.removeItem(STORAGE_KEYS.openrouterKey);
     }
   }, [personalApiKey]);
 
   useEffect(() => {
     if (preferredModel.trim()) {
-      localStorage.setItem("persona-ai-model", preferredModel.trim());
+      localStorage.setItem(STORAGE_KEYS.model, preferredModel.trim());
     } else {
-      localStorage.removeItem("persona-ai-model");
+      localStorage.removeItem(STORAGE_KEYS.model);
     }
   }, [preferredModel]);
 
   useEffect(() => {
-    localStorage.setItem("persona-ai-model-mode", modelSelectionMode);
+    localStorage.setItem(STORAGE_KEYS.modelMode, modelSelectionMode);
   }, [modelSelectionMode]);
 
   useEffect(() => {
@@ -382,7 +398,7 @@ export function ChatWindow() {
         setAppDefaultModel(nextDefaultModel);
         setModelOptions(data.llm?.modelOptions ?? []);
 
-        if (data.llm?.defaultModel && !readStoredSetting("persona-ai-model")) {
+        if (data.llm?.defaultModel && !readStoredSetting(STORAGE_KEYS.model, LEGACY_STORAGE_KEYS.model)) {
           setPreferredModel(nextDefaultModel);
         }
 
@@ -1729,7 +1745,7 @@ function PersonaLibrary({
       <div className="flex h-16 items-center justify-between border-b px-4">
         <div className="flex items-center gap-2 font-semibold">
           <LibraryIcon className="size-4" />
-          PersonaAI
+          Mindprint
         </div>
         <Button type="button" size="icon-sm" onClick={onCreate} aria-label="New persona">
           <PlusIcon />
@@ -2788,7 +2804,7 @@ function SettingsDialog({
                     active={apiKeyMode === "app"}
                     description={
                       appApiKeyAvailable
-                        ? `PersonaAI pays for requests and uses ${appModelLabel}.`
+                        ? `Mindprint pays for requests and uses ${appModelLabel}.`
                         : "The app API key is not configured. Add your own OpenRouter key to chat."
                     }
                     disabled={!appApiKeyAvailable}
@@ -3259,7 +3275,7 @@ function EmptyLearningChat({
                   Build a study workspace from one source.
                 </h2>
                 <p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground">
-                  Upload a text-based PDF or paste a transcript. PersonaAI extracts the text,
+                  Upload a text-based PDF or paste a transcript. Mindprint extracts the text,
                   creates searchable chunks, and prepares citation-grounded study chat.
                 </p>
               </div>
@@ -5211,24 +5227,32 @@ async function readAuthError(response: Response) {
 }
 
 function clearLocalSettings() {
-  localStorage.removeItem("persona-ai-api-key-mode");
-  localStorage.removeItem("persona-ai-openrouter-key");
-  localStorage.removeItem("persona-ai-model");
-  localStorage.removeItem("persona-ai-model-mode");
-  localStorage.removeItem("persona-ai-compact-mode");
-  localStorage.removeItem("persona-ai-show-profile-rail");
+  Object.values(STORAGE_KEYS).forEach((key) => localStorage.removeItem(key));
+  Object.values(LEGACY_STORAGE_KEYS).forEach((key) => localStorage.removeItem(key));
 }
 
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Something went wrong.";
 }
 
-function readStoredSetting(key: string) {
+function readStoredSetting(key: string, legacyKey?: string) {
   if (typeof window === "undefined") {
     return null;
   }
 
-  return window.localStorage.getItem(key);
+  const value = window.localStorage.getItem(key);
+
+  if (value !== null || !legacyKey) {
+    return value;
+  }
+
+  const legacyValue = window.localStorage.getItem(legacyKey);
+
+  if (legacyValue !== null) {
+    window.localStorage.setItem(key, legacyValue);
+  }
+
+  return legacyValue;
 }
 
 function formatSessionDate(value: string | null) {

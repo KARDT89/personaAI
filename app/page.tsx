@@ -51,7 +51,7 @@ export default function LandingPage() {
             <span className="flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
               <SparklesIcon className="size-4" />
             </span>
-            PersonaAI
+            Mindprint
           </Link>
           <div className="flex items-center gap-2">
             <ThemeToggle />

@@ -119,7 +119,7 @@ export function AuthGate({ children }: AuthGateProps) {
     <div className="flex min-h-dvh items-center justify-center bg-muted/30 p-4">
       <Card className="w-full max-w-md">
         <CardHeader>
-          <CardTitle>PersonaAI</CardTitle>
+          <CardTitle>Mindprint</CardTitle>
           <CardDescription>
             Sign in to keep chats and custom personas separate.
           </CardDescription>

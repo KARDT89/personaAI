@@ -18,8 +18,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "PersonaAI",
-  description: "Chat with coding personas.",
+  title: "Mindprint",
+  description: "Build AI personas and study libraries from real sources.",
 };
 
 export default function RootLayout({

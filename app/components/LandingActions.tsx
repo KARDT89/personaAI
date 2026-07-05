@@ -29,7 +29,7 @@ export function LandingHeaderActions() {
         target="_blank"
         rel="noreferrer"
         className={cn(buttonVariants({ variant: "ghost", size: "icon-sm" }), "hidden sm:inline-flex")}
-        aria-label="Open PersonaAI on GitHub"
+        aria-label="Open Mindprint on GitHub"
       >
         <GitBranchIcon />
       </Link>

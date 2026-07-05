@@ -13,7 +13,7 @@ if (!authSecret && process.env.NODE_ENV === "production") {
 }
 
 export const auth = betterAuth({
-  secret: authSecret ?? "persona-ai-local-dev-secret-change-me",
+  secret: authSecret ?? "mindprint-local-dev-secret-change-me",
   baseURL: process.env.BETTER_AUTH_URL ?? "http://localhost:3000",
   database: drizzleAdapter(db, {
     provider: "pg",
