@@ -1,6 +1,6 @@
 import "dotenv/config";
 
-import { db, pool, schema } from "@/lib/db";
+import { db, pool, schema } from "@/lib/db/client";
 import { buildPersonaRecord, getAvailablePersonas } from "@/lib/personas";
 
 async function main() {
