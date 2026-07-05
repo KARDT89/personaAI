@@ -83,6 +83,19 @@ type PersonaResponse = {
 
 type SourceType = "youtube-transcript" | "whatsapp-chat" | "other";
 type PersonaDialogMode = "create" | "edit";
+type PersonaDialogStep = "source" | "review";
+type PersonaReviewForm = {
+  name: string;
+  tagline: string;
+  bio: string;
+  identity: string;
+  topics: string;
+  starterPrompts: string;
+  toneTraits: string;
+  catchphrases: string;
+  teachingPattern: string;
+  fewShot: string;
+};
 
 const FALLBACK_PERSONAS: PersonaOption[] = [
   { id: "hitesh", name: "Hitesh", avatarUrl: "/hitesh.jpg", isBuiltIn: true },
@@ -730,10 +743,16 @@ function PersonaEditorDialog({
 }) {
   const initialDraft = persona?.personaData ?? (persona ? personaToDraft(persona) : null);
   const [name, setName] = useState(initialDraft?.name ?? "");
+  const [step, setStep] = useState<PersonaDialogStep>(
+    mode === "edit" && initialDraft ? "review" : "source",
+  );
   const [sourceType, setSourceType] = useState<SourceType>("youtube-transcript");
   const [sourceText, setSourceText] = useState("");
   const [sourceFile, setSourceFile] = useState<File | null>(null);
   const [draft, setDraft] = useState<PersonaData | null>(initialDraft);
+  const [reviewForm, setReviewForm] = useState<PersonaReviewForm>(
+    initialDraft ? personaToReviewForm(initialDraft) : createEmptyReviewForm(),
+  );
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
@@ -762,7 +781,10 @@ function PersonaEditorDialog({
       }
 
       setDraft(data.persona);
-      toast.success("Draft persona generated.");
+      setReviewForm(personaToReviewForm(data.persona));
+      setName(data.persona.name);
+      setStep("review");
+      toast.success("Draft generated. Review it, then save to your library.");
     } catch (caughtError) {
       toast.error(getErrorMessage(caughtError));
     } finally {
@@ -770,14 +792,12 @@ function PersonaEditorDialog({
     }
   }
 
-  async function handleSave(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
+  async function handleSave() {
     if (!draft) {
       return;
     }
 
-    const nextDraft = readPersonaDraftFromForm(new FormData(event.currentTarget), draft);
+    const nextDraft = reviewFormToPersonaData(reviewForm, draft);
     setIsSaving(true);
 
     try {
@@ -794,6 +814,7 @@ function PersonaEditorDialog({
       }
 
       toast.success(mode === "edit" ? "Persona updated." : "Persona saved.");
+      setDraft(nextDraft);
       onSaved(data.persona);
     } catch (caughtError) {
       toast.error(getErrorMessage(caughtError));
@@ -806,16 +827,31 @@ function PersonaEditorDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[92dvh] overflow-hidden sm:max-w-3xl">
-        <DialogHeader>
+      <DialogContent className="flex max-h-[92dvh] flex-col gap-0 overflow-hidden p-0 sm:max-w-3xl">
+        <DialogHeader className="border-b p-6 pb-4">
           <DialogTitle>{mode === "edit" ? "Edit persona" : "Create persona"}</DialogTitle>
           <DialogDescription>
             Paste a transcript or upload a .txt file. Only the compact persona draft is saved.
           </DialogDescription>
         </DialogHeader>
 
-        <div className="grid min-h-0 gap-4 overflow-y-auto pr-1 lg:grid-cols-[0.9fr_1.1fr]">
-          <div className="space-y-4">
+        <div className="flex items-center gap-2 border-b px-6 py-3">
+          <StepPill active={step === "source"} index={1} label="Source" />
+          <div className="h-px flex-1 bg-border" />
+          <StepPill active={step === "review"} index={2} label="Review & Save" />
+        </div>
+
+        {step === "source" ? (
+          <div className="min-h-0 space-y-4 overflow-y-auto p-6">
+            {draft ? (
+              <Alert className="mb-4">
+                <FileTextIcon />
+                <AlertTitle>Draft ready</AlertTitle>
+                <AlertDescription>
+                  You already generated a draft. Review it or generate again with new source text.
+                </AlertDescription>
+              </Alert>
+            ) : null}
             <div className="space-y-1.5">
               <Label htmlFor="persona-name">Persona name</Label>
               <Input
@@ -859,71 +895,107 @@ function PersonaEditorDialog({
                 className="min-h-40"
               />
             </div>
-            <Button
-              type="button"
-              className="w-full"
-              disabled={!canGenerate || isGenerating}
-              onClick={() => void handleGenerate()}
-            >
-              {isGenerating ? <Spinner /> : <SparklesIcon />}
-              Generate draft
-            </Button>
           </div>
-
-          <form onSubmit={handleSave} className="space-y-3">
-            {draft ? (
+        ) : (
+          <>
+            <div className="min-h-0 flex-1 overflow-y-auto p-6">
+              {draft ? (
               <>
-                <DraftField name="name" label="Name" defaultValue={draft.name} />
-                <DraftField name="tagline" label="Tagline" defaultValue={draft.tagline ?? ""} />
-                <DraftArea name="bio" label="Bio" defaultValue={draft.bio ?? ""} rows={2} />
-                <DraftArea name="identity" label="Identity" defaultValue={draft.identity} rows={3} />
+                <div className="mb-5 rounded-3xl border bg-muted/35 p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="truncate text-base font-semibold">
+                        {reviewForm.name || "Untitled persona"}
+                      </div>
+                      <div className="mt-1 text-sm text-muted-foreground">
+                        {reviewForm.tagline || "Private custom persona"}
+                      </div>
+                    </div>
+                    <Badge variant="secondary">Private custom persona</Badge>
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {lineStringToArray(reviewForm.topics)
+                      .slice(0, 5)
+                      .map((topic) => (
+                        <Badge key={topic} variant="outline">
+                          {topic}
+                        </Badge>
+                      ))}
+                  </div>
+                </div>
+
+                <div className="grid gap-3">
+                  <DraftField
+                    name="review-name"
+                    label="Name"
+                    value={reviewForm.name}
+                    onChange={(value) => setReviewField("name", value)}
+                  />
+                  <DraftField
+                    name="review-tagline"
+                    label="Tagline"
+                    value={reviewForm.tagline}
+                    onChange={(value) => setReviewField("tagline", value)}
+                  />
+                  <DraftArea
+                    name="review-bio"
+                    label="Bio"
+                    value={reviewForm.bio}
+                    rows={2}
+                    onChange={(value) => setReviewField("bio", value)}
+                  />
+                  <DraftArea
+                    name="review-identity"
+                    label="Identity"
+                    value={reviewForm.identity}
+                    rows={3}
+                    onChange={(value) => setReviewField("identity", value)}
+                  />
                 <DraftArea
-                  name="topics"
+                  name="review-topics"
                   label="Topics"
-                  defaultValue={(draft.topics ?? []).join("\n")}
+                  value={reviewForm.topics}
                   rows={3}
+                  onChange={(value) => setReviewField("topics", value)}
                 />
                 <DraftArea
-                  name="starter_prompts"
+                  name="review-starter-prompts"
                   label="Starter prompts"
-                  defaultValue={(draft.starter_prompts ?? []).join("\n")}
+                  value={reviewForm.starterPrompts}
                   rows={3}
+                  onChange={(value) => setReviewField("starterPrompts", value)}
                 />
                 <DraftArea
-                  name="tone_traits"
+                  name="review-tone-traits"
                   label="Tone traits"
-                  defaultValue={draft.tone_traits.join("\n")}
+                  value={reviewForm.toneTraits}
                   rows={3}
+                  onChange={(value) => setReviewField("toneTraits", value)}
                 />
                 <DraftArea
-                  name="catchphrases"
+                  name="review-catchphrases"
                   label="Catchphrases"
-                  defaultValue={draft.catchphrases.join("\n")}
+                  value={reviewForm.catchphrases}
                   rows={3}
+                  onChange={(value) => setReviewField("catchphrases", value)}
                 />
                 <DraftField
-                  name="teaching_pattern"
+                  name="review-teaching-pattern"
                   label="Response pattern"
-                  defaultValue={draft.teaching_pattern}
+                  value={reviewForm.teachingPattern}
+                  onChange={(value) => setReviewField("teachingPattern", value)}
                 />
                 <DraftArea
-                  name="few_shot"
+                  name="review-few-shot"
                   label="Few-shot examples"
-                  defaultValue={draft.few_shot.map((item) => `${item.q} | ${item.a}`).join("\n")}
+                  value={reviewForm.fewShot}
                   rows={4}
+                  onChange={(value) => setReviewField("fewShot", value)}
                 />
-                <DialogFooter>
-                  <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-                    Cancel
-                  </Button>
-                  <Button type="submit" disabled={isSaving}>
-                    {isSaving ? <Spinner /> : <FileTextIcon />}
-                    {mode === "edit" ? "Save changes" : "Save persona"}
-                  </Button>
-                </DialogFooter>
+                </div>
               </>
             ) : (
-              <div className="flex min-h-full flex-col items-center justify-center rounded-3xl border border-dashed p-8 text-center">
+              <div className="flex min-h-72 flex-col items-center justify-center rounded-3xl border border-dashed p-8 text-center">
                 <UploadIcon className="mb-3 size-8 text-muted-foreground" />
                 <h3 className="font-medium">Generate a draft to review</h3>
                 <p className="mt-2 text-sm text-muted-foreground">
@@ -931,45 +1003,110 @@ function PersonaEditorDialog({
                 </p>
               </div>
             )}
-          </form>
-        </div>
+            </div>
+          </>
+        )}
+
+        <DialogFooter className="sticky bottom-0 border-t bg-popover p-4">
+          {step === "review" ? (
+            <Button type="button" variant="outline" onClick={() => setStep("source")}>
+              <SparklesIcon />
+              Regenerate from source
+            </Button>
+          ) : draft ? (
+            <Button type="button" variant="outline" onClick={() => setStep("review")}>
+              Review draft
+            </Button>
+          ) : (
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+              Cancel
+            </Button>
+          )}
+          {step === "source" ? (
+            <Button
+              type="button"
+              disabled={!canGenerate || isGenerating}
+              onClick={() => void handleGenerate()}
+            >
+              {isGenerating ? <Spinner /> : <SparklesIcon />}
+              Generate draft
+            </Button>
+          ) : (
+            <Button type="button" disabled={!draft || isSaving} onClick={() => void handleSave()}>
+              {isSaving ? <Spinner /> : <FileTextIcon />}
+              {mode === "edit" ? "Save changes" : "Save persona"}
+            </Button>
+          )}
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );
+
+  function setReviewField(field: keyof PersonaReviewForm, value: string) {
+    setReviewForm((currentForm) => ({ ...currentForm, [field]: value }));
+  }
 }
 
 function DraftField({
-  defaultValue,
   label,
   name,
+  onChange,
+  value,
 }: {
-  defaultValue: string;
   label: string;
   name: string;
+  onChange: (value: string) => void;
+  value: string;
 }) {
   return (
     <div className="space-y-1.5">
       <Label htmlFor={name}>{label}</Label>
-      <Input id={name} name={name} defaultValue={defaultValue} />
+      <Input id={name} name={name} value={value} onChange={(event) => onChange(event.target.value)} />
     </div>
   );
 }
 
 function DraftArea({
-  defaultValue,
   label,
   name,
+  onChange,
   rows,
+  value,
 }: {
-  defaultValue: string;
   label: string;
   name: string;
+  onChange: (value: string) => void;
   rows: number;
+  value: string;
 }) {
   return (
     <div className="space-y-1.5">
       <Label htmlFor={name}>{label}</Label>
-      <Textarea id={name} name={name} defaultValue={defaultValue} rows={rows} />
+      <Textarea id={name} name={name} value={value} rows={rows} onChange={(event) => onChange(event.target.value)} />
+    </div>
+  );
+}
+
+function StepPill({
+  active,
+  index,
+  label,
+}: {
+  active: boolean;
+  index: number;
+  label: string;
+}) {
+  return (
+    <div
+      className={cn(
+        "flex items-center gap-2 rounded-2xl px-2 py-1 text-xs font-medium",
+        active ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground",
+      )}
+    >
+      <span className="flex size-5 items-center justify-center rounded-full bg-background/20">
+        {index}
+      </span>
+      {label}
     </div>
   );
 }
@@ -991,34 +1128,57 @@ function PersonaAvatar({
   );
 }
 
-function readPersonaDraftFromForm(form: FormData, previousDraft: PersonaData): PersonaData {
+function createEmptyReviewForm(): PersonaReviewForm {
   return {
-    ...previousDraft,
-    name: readFormText(form, "name", previousDraft.name),
-    tagline: readFormText(form, "tagline", previousDraft.tagline ?? "Custom persona"),
-    bio: readFormText(form, "bio", previousDraft.bio ?? previousDraft.identity),
-    identity: readFormText(form, "identity", previousDraft.identity),
-    topics: readLines(form, "topics"),
-    starter_prompts: readLines(form, "starter_prompts"),
-    tone_traits: readLines(form, "tone_traits"),
-    catchphrases: readLines(form, "catchphrases"),
-    teaching_pattern: readFormText(form, "teaching_pattern", previousDraft.teaching_pattern),
-    few_shot: readFewShot(form),
+    name: "",
+    tagline: "",
+    bio: "",
+    identity: "",
+    topics: "",
+    starterPrompts: "",
+    toneTraits: "",
+    catchphrases: "",
+    teachingPattern:
+      "understand the question -> answer in style -> give a practical next step",
+    fewShot: "",
   };
 }
 
-function readFormText(form: FormData, key: string, fallback: string) {
-  const value = form.get(key);
-  return typeof value === "string" && value.trim() ? value.trim() : fallback;
+function personaToReviewForm(persona: PersonaData): PersonaReviewForm {
+  return {
+    name: persona.name,
+    tagline: persona.tagline ?? "",
+    bio: persona.bio ?? "",
+    identity: persona.identity,
+    topics: (persona.topics ?? []).join("\n"),
+    starterPrompts: (persona.starter_prompts ?? []).join("\n"),
+    toneTraits: persona.tone_traits.join("\n"),
+    catchphrases: persona.catchphrases.join("\n"),
+    teachingPattern: persona.teaching_pattern,
+    fewShot: persona.few_shot.map((item) => `${item.q} | ${item.a}`).join("\n"),
+  };
 }
 
-function readLines(form: FormData, key: string) {
-  const value = form.get(key);
+function reviewFormToPersonaData(
+  form: PersonaReviewForm,
+  previousDraft: PersonaData,
+): PersonaData {
+  return {
+    ...previousDraft,
+    name: form.name.trim() || previousDraft.name,
+    tagline: form.tagline.trim() || "Custom persona",
+    bio: form.bio.trim() || previousDraft.bio || previousDraft.identity,
+    identity: form.identity.trim() || previousDraft.identity,
+    topics: lineStringToArray(form.topics),
+    starter_prompts: lineStringToArray(form.starterPrompts).slice(0, 4),
+    tone_traits: lineStringToArray(form.toneTraits),
+    catchphrases: lineStringToArray(form.catchphrases),
+    teaching_pattern: form.teachingPattern.trim() || previousDraft.teaching_pattern,
+    few_shot: fewShotStringToArray(form.fewShot),
+  };
+}
 
-  if (typeof value !== "string") {
-    return [];
-  }
-
+function lineStringToArray(value: string) {
   return value
     .split(/\n|,/)
     .map((item) => item.trim())
@@ -1026,23 +1186,19 @@ function readLines(form: FormData, key: string) {
     .slice(0, 12);
 }
 
-function readFewShot(form: FormData) {
-  const value = form.get("few_shot");
-
-  if (typeof value !== "string") {
-    return [];
-  }
-
+function fewShotStringToArray(value: string) {
   return value
     .split("\n")
-    .map((line) => {
-      const [q, ...answerParts] = line.split("|");
-      const a = answerParts.join("|");
-
-      return q?.trim() && a?.trim() ? { q: q.trim(), a: a.trim() } : null;
-    })
+    .map((line) => parseFewShotLine(line))
     .filter((item): item is { q: string; a: string } => Boolean(item))
     .slice(0, 8);
+}
+
+function parseFewShotLine(line: string) {
+  const [q, ...answerParts] = line.split("|");
+  const a = answerParts.join("|");
+
+  return q?.trim() && a?.trim() ? { q: q.trim(), a: a.trim() } : null;
 }
 
 function personaToDraft(persona: PersonaOption): PersonaData {
