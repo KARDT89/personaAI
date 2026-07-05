@@ -4,6 +4,11 @@ Mindprint is a private AI workspace for building chat personas and study librari
 
 The app is built for people who want AI conversations that are less generic and more grounded in actual material: transcripts, WhatsApp-style chats, PDFs, podcast notes, and curated persona profiles.
 
+## Demo
+
+- **Live app**: https://mindprint.tamalsarkar.dev
+- **Demo video**: https://youtu.be/zZ4uQQ9O0b8
+
 ## What It Does
 
 Mindprint has two main workspaces:
