@@ -65,7 +65,11 @@ import {
   MessageScrollerProvider,
   MessageScrollerViewport,
 } from "@/components/ui/message-scroller";
-import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
+import {
+  NativeSelect,
+  NativeSelectOptGroup,
+  NativeSelectOption,
+} from "@/components/ui/native-select";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -139,10 +143,23 @@ type AppConfigResponse = {
   llm?: {
     appApiKeyAvailable?: boolean;
     defaultModel?: string;
+    modelOptions?: ModelOptionGroup[];
   };
 };
 
+type ModelOption = {
+  id: string;
+  label: string;
+  description?: string;
+};
+
+type ModelOptionGroup = {
+  label: string;
+  options: ModelOption[];
+};
+
 type ApiKeyMode = "app" | "personal";
+type ModelSelectionMode = "curated" | "custom";
 type SourceType = "youtube-transcript" | "whatsapp-chat" | "other";
 type SourceMemoryPayload = {
   sourceType: SourceType;
@@ -235,6 +252,8 @@ const FALLBACK_PERSONAS: PersonaOption[] = [
   { id: "hitesh", name: "Hitesh", avatarUrl: "/hitesh.jpg", isBuiltIn: true },
   { id: "piyush", name: "Piyush", avatarUrl: "/piyush.jpg", isBuiltIn: true },
 ];
+const DEFAULT_CHAT_MODEL = "openai/gpt-4o";
+const CUSTOM_MODEL_VALUE = "__custom-openrouter-model__";
 
 export function ChatWindow() {
   const { data: authSession, refetch: refetchAuthSession } = authClient.useSession();
@@ -287,8 +306,13 @@ export function ChatWindow() {
     () => readStoredSetting("persona-ai-openrouter-key") ?? "",
   );
   const [preferredModel, setPreferredModel] = useState(
-    () => readStoredSetting("persona-ai-model") ?? "openai/gpt-4o",
+    () => readStoredSetting("persona-ai-model") ?? DEFAULT_CHAT_MODEL,
   );
+  const [modelSelectionMode, setModelSelectionMode] = useState<ModelSelectionMode>(() =>
+    readStoredSetting("persona-ai-model-mode") === "custom" ? "custom" : "curated",
+  );
+  const [appDefaultModel, setAppDefaultModel] = useState(DEFAULT_CHAT_MODEL);
+  const [modelOptions, setModelOptions] = useState<ModelOptionGroup[]>([]);
   const didInitRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
@@ -300,6 +324,7 @@ export function ChatWindow() {
   const visibleMessages = activeMode === "learning" ? learningMessages : messages;
   const latestVisibleMessage = visibleMessages.at(-1);
   const latestVisibleMessageContent = latestVisibleMessage?.content ?? "";
+  const requestModel = apiKeyMode === "personal" ? preferredModel.trim() || undefined : undefined;
 
   useEffect(() => {
     localStorage.setItem("persona-ai-compact-mode", String(isCompactMode));
@@ -333,8 +358,16 @@ export function ChatWindow() {
   }, [personalApiKey]);
 
   useEffect(() => {
-    localStorage.setItem("persona-ai-model", preferredModel.trim() || "openai/gpt-4o");
+    if (preferredModel.trim()) {
+      localStorage.setItem("persona-ai-model", preferredModel.trim());
+    } else {
+      localStorage.removeItem("persona-ai-model");
+    }
   }, [preferredModel]);
+
+  useEffect(() => {
+    localStorage.setItem("persona-ai-model-mode", modelSelectionMode);
+  }, [modelSelectionMode]);
 
   useEffect(() => {
     async function loadAppConfig() {
@@ -342,11 +375,14 @@ export function ChatWindow() {
         const response = await fetch("/api/app-config");
         const data = (await response.json()) as AppConfigResponse;
         const hasAppKey = Boolean(data.llm?.appApiKeyAvailable);
+        const nextDefaultModel = data.llm?.defaultModel || DEFAULT_CHAT_MODEL;
 
         setAppApiKeyAvailable(hasAppKey);
+        setAppDefaultModel(nextDefaultModel);
+        setModelOptions(data.llm?.modelOptions ?? []);
 
         if (data.llm?.defaultModel && !readStoredSetting("persona-ai-model")) {
-          setPreferredModel(data.llm.defaultModel);
+          setPreferredModel(nextDefaultModel);
         }
 
         if (!hasAppKey && apiKeyMode === "app") {
@@ -685,7 +721,7 @@ export function ChatWindow() {
           personaId: activePersona,
           message: nextMessage,
           apiKey: apiKeyMode === "personal" ? personalApiKey.trim() || undefined : undefined,
-          model: preferredModel.trim() || undefined,
+          model: requestModel,
         }),
         signal: controller.signal,
       });
@@ -782,7 +818,7 @@ export function ChatWindow() {
           sourceId: currentLearningSource.id,
           message: nextMessage,
           apiKey: apiKeyMode === "personal" ? personalApiKey.trim() || undefined : undefined,
-          model: preferredModel.trim() || undefined,
+          model: requestModel,
         }),
         signal: controller.signal,
       });
@@ -1461,14 +1497,18 @@ export function ChatWindow() {
         key={`${authSession?.user?.email ?? "user"}-${authSession?.user?.name ?? ""}`}
         apiKeyMode={apiKeyMode}
         appApiKeyAvailable={appApiKeyAvailable}
+        appDefaultModel={appDefaultModel}
         compactMode={isCompactMode}
         model={preferredModel}
+        modelSelectionMode={modelSelectionMode}
+        modelOptions={modelOptions}
         open={isSettingsOpen}
         personalApiKey={personalApiKey}
         user={authSession?.user ?? null}
         onApiKeyModeChange={setApiKeyMode}
         onCompactModeChange={setIsCompactMode}
         onModelChange={setPreferredModel}
+        onModelSelectionModeChange={setModelSelectionMode}
         onOpenChange={setIsSettingsOpen}
         onPersonalApiKeyChange={setPersonalApiKey}
         onSessionRefresh={() => void refetchAuthSession()}
@@ -1478,7 +1518,7 @@ export function ChatWindow() {
         key={`${dialogMode}-${personaBeingEdited?.id ?? "new"}-${isPersonaDialogOpen}`}
         apiKey={apiKeyMode === "personal" ? personalApiKey.trim() || undefined : undefined}
         mode={dialogMode}
-        model={preferredModel.trim() || undefined}
+        model={requestModel}
         open={isPersonaDialogOpen}
         persona={personaBeingEdited}
         onOpenChange={setIsPersonaDialogOpen}
@@ -2084,11 +2124,15 @@ function AppModeSwitch({
 function SettingsDialog({
   apiKeyMode,
   appApiKeyAvailable,
+  appDefaultModel,
   compactMode,
   model,
+  modelSelectionMode,
+  modelOptions,
   onApiKeyModeChange,
   onCompactModeChange,
   onModelChange,
+  onModelSelectionModeChange,
   onOpenChange,
   onPersonalApiKeyChange,
   onSessionRefresh,
@@ -2098,11 +2142,15 @@ function SettingsDialog({
 }: {
   apiKeyMode: ApiKeyMode;
   appApiKeyAvailable: boolean;
+  appDefaultModel: string;
   compactMode: boolean;
   model: string;
+  modelSelectionMode: ModelSelectionMode;
+  modelOptions: ModelOptionGroup[];
   onApiKeyModeChange: (mode: ApiKeyMode) => void;
   onCompactModeChange: (enabled: boolean) => void;
   onModelChange: (model: string) => void;
+  onModelSelectionModeChange: (mode: ModelSelectionMode) => void;
   onOpenChange: (open: boolean) => void;
   onPersonalApiKeyChange: (apiKey: string) => void;
   onSessionRefresh: () => void;
@@ -2210,6 +2258,21 @@ function SettingsDialog({
     Boolean(userEmail) &&
     deleteConfirmation.trim().toLowerCase() === userEmail.toLowerCase() &&
     Boolean(deletePassword);
+  const flatModelOptions = modelOptions.flatMap((group) => group.options);
+  const hasSelectedCuratedModel = flatModelOptions.some((option) => option.id === model);
+  const selectedModelValue =
+    modelSelectionMode === "custom" || !hasSelectedCuratedModel ? CUSTOM_MODEL_VALUE : model;
+  const appModelLabel = getModelLabel(appDefaultModel, flatModelOptions);
+
+  function handleModelSelect(nextValue: string) {
+    if (nextValue === CUSTOM_MODEL_VALUE) {
+      onModelSelectionModeChange("custom");
+      return;
+    }
+
+    onModelSelectionModeChange("curated");
+    onModelChange(nextValue);
+  }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -2372,8 +2435,8 @@ function SettingsDialog({
                     active={apiKeyMode === "app"}
                     description={
                       appApiKeyAvailable
-                        ? "Use the app's API key. Paid-plan controls can be added later."
-                        : "App API key is not configured. Add your own key to chat."
+                        ? `PersonaAI pays for requests and uses ${appModelLabel}.`
+                        : "The app API key is not configured. Add your own OpenRouter key to chat."
                     }
                     disabled={!appApiKeyAvailable}
                     label="Use App API Key"
@@ -2381,7 +2444,7 @@ function SettingsDialog({
                   />
                   <ApiModeButton
                     active={apiKeyMode === "personal"}
-                    description="Use a browser-only OpenRouter key for your chats."
+                    description="You pay OpenRouter directly and can choose a recommended model or enter any model ID."
                     label="Use My API Key"
                     onClick={() => onApiKeyModeChange("personal")}
                   />
@@ -2411,19 +2474,60 @@ function SettingsDialog({
                     </Button>
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    Stored in this browser and sent only when “Use My API Key” is selected.
+                    Stored only in this browser and sent with AI requests only when “Use My API Key” is selected.
                   </p>
                 </div>
                 <div className="grid gap-1.5">
                   <Label htmlFor="settings-openrouter-model">Model</Label>
-                  <Input
-                    id="settings-openrouter-model"
-                    name="openrouter-model"
-                    autoComplete="off"
-                    value={model}
-                    onChange={(event) => onModelChange(event.target.value)}
-                    placeholder="openai/gpt-4o"
-                  />
+                  {apiKeyMode === "app" ? (
+                    <div className="rounded-lg border bg-muted/30 p-3">
+                      <div className="text-sm font-medium">{appModelLabel}</div>
+                      <div className="mt-1 font-mono text-xs text-muted-foreground">
+                        {appDefaultModel}
+                      </div>
+                      <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                        App API key requests use the server-configured model. Switch to your own
+                        API key to choose a different model.
+                      </p>
+                    </div>
+                  ) : (
+                    <>
+                      <NativeSelect
+                        id="settings-openrouter-model"
+                        name="openrouter-model"
+                        className="w-full"
+                        value={selectedModelValue}
+                        onChange={(event) => handleModelSelect(event.target.value)}
+                      >
+                        {modelOptions.map((group) => (
+                          <NativeSelectOptGroup key={group.label} label={group.label}>
+                            {group.options.map((option) => (
+                              <NativeSelectOption key={option.id} value={option.id}>
+                                {option.label} - {option.id}
+                              </NativeSelectOption>
+                            ))}
+                          </NativeSelectOptGroup>
+                        ))}
+                        <NativeSelectOption value={CUSTOM_MODEL_VALUE}>
+                          Advanced: custom OpenRouter model ID
+                        </NativeSelectOption>
+                      </NativeSelect>
+                      {selectedModelValue === CUSTOM_MODEL_VALUE ? (
+                        <Input
+                          id="settings-openrouter-model-custom"
+                          name="openrouter-model-custom"
+                          autoComplete="off"
+                          value={model}
+                          onChange={(event) => onModelChange(event.target.value)}
+                          placeholder="provider/model-name"
+                        />
+                      ) : null}
+                      <p className="text-xs leading-5 text-muted-foreground">
+                        This model is used for chat, learning chats, and persona generation when
+                        your own API key is selected.
+                      </p>
+                    </>
+                  )}
                 </div>
               </section>
             </TabsContent>
@@ -2481,6 +2585,10 @@ function ApiModeButton({
       </span>
     </button>
   );
+}
+
+function getModelLabel(modelId: string, options: ModelOption[]) {
+  return options.find((option) => option.id === modelId)?.label ?? modelId;
 }
 
 function SettingSwitch({
@@ -2987,19 +3095,12 @@ function LearningDetails({
                   </AlertDescription>
                 </Alert>
 
-                <div className="space-y-2">
+                <div className="min-w-0 space-y-2">
                   <div className="text-xs font-medium uppercase text-muted-foreground">Recent chats</div>
                   {sourceSessions.length > 0 ? (
-                    <div className="grid gap-2">
+                    <div className="grid min-w-0 gap-2">
                       {sourceSessions.map((session) => (
-                        <div key={session.id} className="rounded-lg border bg-background p-2 text-sm">
-                          <div className="truncate font-medium">
-                            {session.title === "New chat" ? "Untitled chat" : session.title}
-                          </div>
-                          <div className="mt-1 truncate text-xs text-muted-foreground">
-                            {session.preview ?? formatSessionDate(session.updatedAt ?? session.createdAt)}
-                          </div>
-                        </div>
+                        <InspectorRecentChatRow key={session.id} session={session} />
                       ))}
                     </div>
                   ) : (
@@ -3054,6 +3155,23 @@ function LearningDetails({
           </TabsContent>
         </ScrollArea>
       </Tabs>
+    </div>
+  );
+}
+
+function InspectorRecentChatRow({ session }: { session: LearningSessionSummary }) {
+  const title = session.title === "New chat" ? "Untitled chat" : session.title;
+  const preview = session.preview ?? formatSessionDate(session.updatedAt ?? session.createdAt);
+
+  return (
+    <div className="flex min-w-0 max-w-full items-start gap-2 overflow-hidden rounded-lg border bg-background p-3 text-sm">
+      <MessageSquareIcon className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
+      <div className="min-w-0 flex-1">
+        <div className="truncate font-medium leading-5">{title}</div>
+        <div className="mt-1 truncate text-xs leading-5 text-muted-foreground" title={preview}>
+          {preview}
+        </div>
+      </div>
     </div>
   );
 }
@@ -4533,6 +4651,7 @@ function clearLocalSettings() {
   localStorage.removeItem("persona-ai-api-key-mode");
   localStorage.removeItem("persona-ai-openrouter-key");
   localStorage.removeItem("persona-ai-model");
+  localStorage.removeItem("persona-ai-model-mode");
   localStorage.removeItem("persona-ai-compact-mode");
   localStorage.removeItem("persona-ai-show-profile-rail");
 }
