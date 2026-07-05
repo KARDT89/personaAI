@@ -8,6 +8,7 @@ import {
   ChevronDownIcon,
   CheckCircle2Icon,
   ClipboardPasteIcon,
+  CopyIcon,
   DatabaseIcon,
   FileTextIcon,
   HeadphonesIcon,
@@ -1406,7 +1407,12 @@ export function ChatWindow() {
                                     !message.content && "min-h-10 min-w-16 animate-soft-shimmer",
                                   )}
                                 >
-                                  {message.content || (
+                                  {message.content ? (
+                                    <ChatMessageBody
+                                      content={message.content}
+                                      role={message.role}
+                                    />
+                                  ) : (
                                     <Spinner className="size-4 text-muted-foreground" />
                                   )}
                                 </BubbleContent>
@@ -1869,6 +1875,345 @@ function ChatHistoryRow({
       >
         <Trash2Icon />
       </Button>
+    </div>
+  );
+}
+
+type MessagePart =
+  | { type: "code"; code: string; language: string }
+  | { type: "text"; text: string };
+type SyntaxTokenType =
+  | "comment"
+  | "function"
+  | "keyword"
+  | "number"
+  | "operator"
+  | "plain"
+  | "punctuation"
+  | "string"
+  | "tag";
+type SyntaxToken = {
+  text: string;
+  type: SyntaxTokenType;
+};
+
+const LANGUAGE_KEYWORDS: Record<string, Set<string>> = {
+  bash: new Set([
+    "case",
+    "do",
+    "done",
+    "elif",
+    "else",
+    "esac",
+    "fi",
+    "for",
+    "function",
+    "if",
+    "in",
+    "then",
+    "while",
+  ]),
+  css: new Set([
+    "and",
+    "from",
+    "important",
+    "in",
+    "not",
+    "only",
+    "or",
+    "screen",
+    "to",
+  ]),
+  html: new Set([]),
+  javascript: new Set([
+    "async",
+    "await",
+    "break",
+    "case",
+    "catch",
+    "class",
+    "const",
+    "continue",
+    "default",
+    "delete",
+    "do",
+    "else",
+    "export",
+    "extends",
+    "finally",
+    "for",
+    "from",
+    "function",
+    "if",
+    "import",
+    "in",
+    "let",
+    "new",
+    "return",
+    "switch",
+    "throw",
+    "try",
+    "typeof",
+    "var",
+    "void",
+    "while",
+    "yield",
+  ]),
+  json: new Set(["false", "null", "true"]),
+  python: new Set([
+    "and",
+    "as",
+    "assert",
+    "async",
+    "await",
+    "break",
+    "class",
+    "continue",
+    "def",
+    "del",
+    "elif",
+    "else",
+    "except",
+    "False",
+    "finally",
+    "for",
+    "from",
+    "global",
+    "if",
+    "import",
+    "in",
+    "is",
+    "lambda",
+    "None",
+    "nonlocal",
+    "not",
+    "or",
+    "pass",
+    "raise",
+    "return",
+    "True",
+    "try",
+    "while",
+    "with",
+    "yield",
+  ]),
+  sql: new Set([
+    "and",
+    "as",
+    "by",
+    "case",
+    "create",
+    "delete",
+    "desc",
+    "distinct",
+    "drop",
+    "else",
+    "end",
+    "from",
+    "group",
+    "having",
+    "in",
+    "insert",
+    "into",
+    "is",
+    "join",
+    "left",
+    "like",
+    "limit",
+    "not",
+    "null",
+    "or",
+    "order",
+    "right",
+    "select",
+    "set",
+    "table",
+    "then",
+    "update",
+    "values",
+    "when",
+    "where",
+  ]),
+  typescript: new Set([
+    "abstract",
+    "as",
+    "async",
+    "await",
+    "boolean",
+    "break",
+    "case",
+    "catch",
+    "class",
+    "const",
+    "continue",
+    "default",
+    "delete",
+    "do",
+    "else",
+    "enum",
+    "export",
+    "extends",
+    "finally",
+    "for",
+    "from",
+    "function",
+    "if",
+    "implements",
+    "import",
+    "in",
+    "interface",
+    "keyof",
+    "let",
+    "new",
+    "number",
+    "private",
+    "protected",
+    "public",
+    "readonly",
+    "return",
+    "string",
+    "switch",
+    "throw",
+    "try",
+    "type",
+    "typeof",
+    "var",
+    "void",
+    "while",
+    "yield",
+  ]),
+};
+
+function ChatMessageBody({
+  content,
+  role,
+}: {
+  content: string;
+  role: ChatMessage["role"];
+}) {
+  if (role === "user") {
+    return <span className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{content}</span>;
+  }
+
+  const parts = parseMessageParts(content);
+
+  return (
+    <div className="min-w-0 space-y-3">
+      {parts.map((part, index) =>
+        part.type === "code" ? (
+          <CodeBlock
+            key={`${part.type}-${index}`}
+            code={part.code}
+            language={part.language}
+          />
+        ) : (
+          <RichTextBlock key={`${part.type}-${index}`} text={part.text} />
+        ),
+      )}
+    </div>
+  );
+}
+
+function RichTextBlock({ text }: { text: string }) {
+  const blocks = text
+    .split(/\n{2,}/)
+    .map((block) => block.trim())
+    .filter(Boolean);
+
+  return (
+    <div className="space-y-2 leading-6">
+      {blocks.map((block, index) => {
+        const lines = block.split("\n").map((line) => line.trimEnd());
+        const isList = lines.every((line) => /^(\s*[-*]\s+|\s*\d+[.)]\s+)/.test(line));
+
+        if (isList) {
+          return (
+            <div key={index} className="space-y-1">
+              {lines.map((line, lineIndex) => (
+                <div key={`${index}-${lineIndex}`} className="flex min-w-0 gap-2">
+                  <span className="shrink-0 text-muted-foreground">
+                    {line.match(/^\s*(\d+[.)]|[-*])/)?.[1] ?? "-"}
+                  </span>
+                  <span className="min-w-0 flex-1 break-words [overflow-wrap:anywhere]">
+                    <InlineCodeText text={line.replace(/^\s*(?:[-*]|\d+[.)])\s+/, "")} />
+                  </span>
+                </div>
+              ))}
+            </div>
+          );
+        }
+
+        return (
+          <p key={index} className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+            <InlineCodeText text={block} />
+          </p>
+        );
+      })}
+    </div>
+  );
+}
+
+function InlineCodeText({ text }: { text: string }) {
+  const segments = text.split(/(`[^`\n]+`)/g);
+
+  return (
+    <>
+      {segments.map((segment, index) =>
+        segment.startsWith("`") && segment.endsWith("`") ? (
+          <code
+            key={index}
+            className="rounded-md bg-background/70 px-1.5 py-0.5 font-mono text-[0.92em]"
+          >
+            {segment.slice(1, -1)}
+          </code>
+        ) : (
+          <span key={index}>{segment}</span>
+        ),
+      )}
+    </>
+  );
+}
+
+function CodeBlock({ code, language }: { code: string; language: string }) {
+  const [didCopy, setDidCopy] = useState(false);
+  const normalizedLanguage = normalizeCodeLanguage(language);
+  const displayLanguage = normalizedLanguage || "code";
+  const highlightedTokens = tokenizeCode(code.replace(/\n$/, ""), normalizedLanguage);
+
+  async function handleCopy() {
+    try {
+      await navigator.clipboard.writeText(code);
+      setDidCopy(true);
+      window.setTimeout(() => setDidCopy(false), 1400);
+    } catch {
+      toast.error("Could not copy code.");
+    }
+  }
+
+  return (
+    <div className="min-w-0 overflow-hidden rounded-lg border bg-zinc-950 text-zinc-50 shadow-sm">
+      <div className="flex min-w-0 items-center justify-between gap-3 border-b border-white/10 bg-white/5 px-3 py-2">
+        <span className="truncate font-mono text-xs text-zinc-300">{displayLanguage}</span>
+        <Button
+          type="button"
+          variant="ghost"
+          size="xs"
+          className="h-7 shrink-0 px-2 text-zinc-300 hover:bg-white/10 hover:text-white"
+          onClick={() => void handleCopy()}
+        >
+          {didCopy ? <CheckCircle2Icon /> : <CopyIcon />}
+          {didCopy ? "Copied" : "Copy"}
+        </Button>
+      </div>
+      <pre className="max-h-[28rem] overflow-auto p-3 text-sm leading-6">
+        <code className="font-mono">
+          {highlightedTokens.map((token, index) => (
+            <span key={index} className={getSyntaxTokenClassName(token.type)}>
+              {token.text}
+            </span>
+          ))}
+        </code>
+      </pre>
     </div>
   );
 }
@@ -4535,6 +4880,212 @@ async function readJsonError(response: Response) {
     return data.error;
   } catch {
     return null;
+  }
+}
+
+function parseMessageParts(content: string): MessagePart[] {
+  const parts: MessagePart[] = [];
+  const codeFencePattern = /```([^\n`]*)\n?([\s\S]*?)```/g;
+  let cursor = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = codeFencePattern.exec(content)) !== null) {
+    if (match.index > cursor) {
+      parts.push({ type: "text", text: content.slice(cursor, match.index) });
+    }
+
+    parts.push({
+      type: "code",
+      language: match[1]?.trim() ?? "",
+      code: match[2] ?? "",
+    });
+    cursor = match.index + match[0].length;
+  }
+
+  if (cursor < content.length) {
+    parts.push({ type: "text", text: content.slice(cursor) });
+  }
+
+  return parts.filter((part) =>
+    part.type === "code" ? part.code.length > 0 : part.text.trim().length > 0,
+  );
+}
+
+function normalizeCodeLanguage(language: string) {
+  const normalized = language.trim().toLowerCase();
+  const aliases: Record<string, string> = {
+    "c++": "cpp",
+    htm: "html",
+    js: "javascript",
+    jsx: "typescript",
+    md: "markdown",
+    node: "javascript",
+    py: "python",
+    sh: "bash",
+    shell: "bash",
+    ts: "typescript",
+    tsx: "typescript",
+    yml: "yaml",
+  };
+
+  return aliases[normalized] ?? normalized;
+}
+
+function tokenizeCode(code: string, language: string): SyntaxToken[] {
+  const tokens: SyntaxToken[] = [];
+  const keywords = getKeywordsForLanguage(language);
+  let index = 0;
+
+  while (index < code.length) {
+    const rest = code.slice(index);
+    const current = code[index];
+
+    if (rest.startsWith("//") || rest.startsWith("--")) {
+      const end = findLineEnd(code, index);
+      tokens.push({ text: code.slice(index, end), type: "comment" });
+      index = end;
+      continue;
+    }
+
+    if (rest.startsWith("/*")) {
+      const end = code.indexOf("*/", index + 2);
+      const nextIndex = end === -1 ? code.length : end + 2;
+      tokens.push({ text: code.slice(index, nextIndex), type: "comment" });
+      index = nextIndex;
+      continue;
+    }
+
+    if (current === "#" && isLineCommentStart(code, index)) {
+      const end = findLineEnd(code, index);
+      tokens.push({ text: code.slice(index, end), type: "comment" });
+      index = end;
+      continue;
+    }
+
+    if (current === "\"" || current === "'" || current === "`") {
+      const end = findStringEnd(code, index, current);
+      tokens.push({ text: code.slice(index, end), type: "string" });
+      index = end;
+      continue;
+    }
+
+    if (current === "<" && /<\/?[A-Za-z]/.test(rest.slice(0, 3))) {
+      const match = rest.match(/^<\/?[A-Za-z][\w:-]*/);
+      if (match) {
+        tokens.push({ text: match[0], type: "tag" });
+        index += match[0].length;
+        continue;
+      }
+    }
+
+    if (/\d/.test(current)) {
+      const match = rest.match(/^\d[\d._]*(?:[A-Za-z%]+)?/);
+      if (match) {
+        tokens.push({ text: match[0], type: "number" });
+        index += match[0].length;
+        continue;
+      }
+    }
+
+    if (/[A-Za-z_$]/.test(current)) {
+      const match = rest.match(/^[A-Za-z_$][\w$-]*/);
+      if (match) {
+        const word = match[0];
+        const nextCharacter = code.slice(index + word.length).trimStart()[0];
+        const tokenType =
+          keywords.has(word) || keywords.has(word.toLowerCase())
+            ? "keyword"
+            : nextCharacter === "("
+              ? "function"
+              : "plain";
+
+        tokens.push({ text: word, type: tokenType });
+        index += word.length;
+        continue;
+      }
+    }
+
+    if (/[{}()[\],.;:]/.test(current)) {
+      tokens.push({ text: current, type: "punctuation" });
+      index += 1;
+      continue;
+    }
+
+    if (/[=+\-*/%<>!&|?:]/.test(current)) {
+      tokens.push({ text: current, type: "operator" });
+      index += 1;
+      continue;
+    }
+
+    tokens.push({ text: current, type: "plain" });
+    index += 1;
+  }
+
+  return tokens;
+}
+
+function getKeywordsForLanguage(language: string) {
+  if (language === "javascript" || language === "typescript") {
+    return LANGUAGE_KEYWORDS[language];
+  }
+
+  if (language === "html" || language === "css" || language === "json") {
+    return LANGUAGE_KEYWORDS[language];
+  }
+
+  return LANGUAGE_KEYWORDS[language] ?? LANGUAGE_KEYWORDS.typescript;
+}
+
+function findLineEnd(code: string, start: number) {
+  const nextLine = code.indexOf("\n", start);
+  return nextLine === -1 ? code.length : nextLine;
+}
+
+function isLineCommentStart(code: string, start: number) {
+  const previousLine = code.lastIndexOf("\n", start - 1);
+  return code.slice(previousLine + 1, start).trim().length === 0;
+}
+
+function findStringEnd(code: string, start: number, quote: string) {
+  let index = start + 1;
+
+  while (index < code.length) {
+    if (code[index] === "\\") {
+      index += 2;
+      continue;
+    }
+
+    if (code[index] === quote) {
+      return index + 1;
+    }
+
+    index += 1;
+  }
+
+  return code.length;
+}
+
+function getSyntaxTokenClassName(type: SyntaxTokenType) {
+  switch (type) {
+    case "comment":
+      return "text-zinc-500";
+    case "function":
+      return "text-sky-300";
+    case "keyword":
+      return "text-fuchsia-300";
+    case "number":
+      return "text-amber-300";
+    case "operator":
+      return "text-zinc-300";
+    case "punctuation":
+      return "text-zinc-400";
+    case "string":
+      return "text-emerald-300";
+    case "tag":
+      return "text-rose-300";
+    case "plain":
+    default:
+      return "text-zinc-100";
   }
 }
 
