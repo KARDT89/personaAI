@@ -84,3 +84,33 @@ export async function GET(
       })),
   });
 }
+
+export async function DELETE(
+  req: Request,
+  context: { params: Promise<unknown> },
+) {
+  const user = await requireUser(req);
+
+  if (!user) {
+    return Response.json({ error: "Unauthorized." }, { status: 401 });
+  }
+
+  const params = (await context.params) as { id?: unknown };
+  const id = typeof params.id === "string" ? params.id : null;
+
+  if (!id) {
+    return Response.json({ error: "Invalid session id." }, { status: 400 });
+  }
+
+  const { db } = await import("@/lib/db");
+  const [deletedSession] = await db
+    .delete(sessions)
+    .where(and(eq(sessions.id, id), eq(sessions.userId, user.id)))
+    .returning({ id: sessions.id });
+
+  if (!deletedSession) {
+    return Response.json({ error: "Session not found." }, { status: 404 });
+  }
+
+  return Response.json({ ok: true });
+}

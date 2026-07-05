@@ -4,13 +4,18 @@ import { ChangeEvent, FormEvent, useCallback, useEffect, useRef, useState } from
 import {
   AlertCircleIcon,
   BotIcon,
+  ChevronDownIcon,
   FileTextIcon,
+  KeyRoundIcon,
   LibraryIcon,
   LogOutIcon,
   MenuIcon,
+  MessageSquareIcon,
+  PanelRightIcon,
   PencilIcon,
   PlusIcon,
   SendIcon,
+  SettingsIcon,
   SparklesIcon,
   Trash2Icon,
   UploadIcon,
@@ -22,6 +27,11 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
 import { Button } from "@/components/ui/button";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import {
   Dialog,
   DialogContent,
@@ -51,6 +61,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Tooltip,
@@ -92,7 +103,15 @@ type PersonaResponse = {
 type SessionSummary = {
   id: string;
   title: string;
+  preview: string | null;
   personaId: string;
+  persona?: {
+    id: string;
+    name: string;
+    avatarUrl?: string | null;
+    tagline?: string | null;
+    isBuiltIn?: boolean;
+  };
   createdAt: string | null;
   updatedAt: string | null;
 };
@@ -142,12 +161,47 @@ export function ChatWindow() {
   const [isPersonaDialogOpen, setIsPersonaDialogOpen] = useState(false);
   const [personaBeingEdited, setPersonaBeingEdited] = useState<PersonaOption | null>(null);
   const [personaBeingDeleted, setPersonaBeingDeleted] = useState<PersonaOption | null>(null);
+  const [sessionBeingDeleted, setSessionBeingDeleted] = useState<SessionSummary | null>(null);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isDeletingPersona, setIsDeletingPersona] = useState(false);
+  const [isDeletingSession, setIsDeletingSession] = useState(false);
+  const [isCompactMode, setIsCompactMode] = useState(() =>
+    readStoredSetting("persona-ai-compact-mode") === "true",
+  );
+  const [showProfileRail, setShowProfileRail] = useState(() =>
+    readStoredSetting("persona-ai-show-profile-rail") !== "false",
+  );
+  const [personalApiKey, setPersonalApiKey] = useState(
+    () => readStoredSetting("persona-ai-openrouter-key") ?? "",
+  );
+  const [preferredModel, setPreferredModel] = useState(
+    () => readStoredSetting("persona-ai-model") ?? "openai/gpt-4o",
+  );
   const didInitRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
 
   const currentPersona =
     personas.find((persona) => persona.id === activePersona) ?? personas[0] ?? FALLBACK_PERSONAS[0];
+
+  useEffect(() => {
+    localStorage.setItem("persona-ai-compact-mode", String(isCompactMode));
+  }, [isCompactMode]);
+
+  useEffect(() => {
+    localStorage.setItem("persona-ai-show-profile-rail", String(showProfileRail));
+  }, [showProfileRail]);
+
+  useEffect(() => {
+    if (personalApiKey.trim()) {
+      localStorage.setItem("persona-ai-openrouter-key", personalApiKey.trim());
+    } else {
+      localStorage.removeItem("persona-ai-openrouter-key");
+    }
+  }, [personalApiKey]);
+
+  useEffect(() => {
+    localStorage.setItem("persona-ai-model", preferredModel.trim() || "openai/gpt-4o");
+  }, [preferredModel]);
 
   const loadSessions = useCallback(async () => {
     setIsLoadingSessions(true);
@@ -196,16 +250,19 @@ export function ChatWindow() {
     }
   }, []);
 
-  const startNewSession = useCallback(async (personaId: string) => {
+  const startNewDraft = useCallback((personaId: string) => {
     abortRef.current?.abort();
     abortRef.current = null;
-    setIsStartingSession(true);
     setIsStreaming(false);
     setError(null);
     setMessages([]);
     setSessionId(null);
     setActivePersona(personaId);
+    setInput("");
+    setIsStartingSession(false);
+  }, []);
 
+  const createSession = useCallback(async (personaId: string) => {
     try {
       const response = await fetch("/api/sessions", {
         method: "POST",
@@ -219,13 +276,13 @@ export function ChatWindow() {
       }
 
       setSessionId(data.session.id);
-      await loadSessions();
+      setActivePersona(personaId);
+      return data.session;
     } catch (caughtError) {
       setError(getErrorMessage(caughtError));
-    } finally {
-      setIsStartingSession(false);
+      return null;
     }
-  }, [loadSessions]);
+  }, []);
 
   const openLatestSessionForPersona = useCallback(
     async (personaId: string) => {
@@ -237,9 +294,9 @@ export function ChatWindow() {
         return;
       }
 
-      await startNewSession(personaId);
+      startNewDraft(personaId);
     },
-    [openSession, sessions, startNewSession],
+    [openSession, sessions, startNewDraft],
   );
 
   const loadPersonas = useCallback(async () => {
@@ -281,20 +338,34 @@ export function ChatWindow() {
       if (latestSession) {
         await openSession(latestSession.id);
       } else {
-        await startNewSession(firstPersonaId);
+        startNewDraft(firstPersonaId);
       }
     }
 
     void boot();
-  }, [loadPersonas, loadSessions, openSession, startNewSession]);
+  }, [loadPersonas, loadSessions, openSession, startNewDraft]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
     const nextMessage = input.trim();
 
-    if (!nextMessage || !sessionId || isStreaming || isStartingSession) {
+    if (!nextMessage || isStreaming || isStartingSession) {
       return;
+    }
+
+    let nextSessionId = sessionId;
+
+    if (!nextSessionId) {
+      setIsStartingSession(true);
+      const createdSession = await createSession(activePersona);
+      setIsStartingSession(false);
+
+      if (!createdSession) {
+        return;
+      }
+
+      nextSessionId = createdSession.id;
     }
 
     const userMessage: ChatMessage = {
@@ -321,9 +392,11 @@ export function ChatWindow() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          sessionId,
+          sessionId: nextSessionId,
           personaId: activePersona,
           message: nextMessage,
+          apiKey: personalApiKey.trim() || undefined,
+          model: preferredModel.trim() || undefined,
         }),
         signal: controller.signal,
       });
@@ -389,7 +462,7 @@ export function ChatWindow() {
     const nextPersona = loadedPersonas.find((item) => item.id === persona.id) ?? persona;
     setIsPersonaDialogOpen(false);
     setPersonaBeingEdited(null);
-    await startNewSession(nextPersona.id);
+    startNewDraft(nextPersona.id);
   }
 
   async function handleDeletePersona() {
@@ -414,7 +487,7 @@ export function ChatWindow() {
       setPersonaBeingDeleted(null);
 
       if (personaBeingDeleted.id === activePersona) {
-        await startNewSession(loadedPersonas[0]?.id ?? "hitesh");
+        startNewDraft(loadedPersonas[0]?.id ?? "hitesh");
       }
     } catch (caughtError) {
       toast.error(getErrorMessage(caughtError));
@@ -423,11 +496,48 @@ export function ChatWindow() {
     }
   }
 
-  const canSend = Boolean(input.trim()) && Boolean(sessionId) && !isStreaming;
+  async function handleDeleteSession() {
+    if (!sessionBeingDeleted) {
+      return;
+    }
+
+    setIsDeletingSession(true);
+
+    try {
+      const response = await fetch(`/api/sessions/${sessionBeingDeleted.id}`, {
+        method: "DELETE",
+      });
+      const data = (await response.json()) as { error?: string };
+
+      if (!response.ok) {
+        throw new Error(data.error ?? "Could not delete chat.");
+      }
+
+      toast.success("Chat deleted.");
+      const deletedSession = sessionBeingDeleted;
+      setSessionBeingDeleted(null);
+      await loadSessions();
+
+      if (deletedSession.id === sessionId) {
+        startNewDraft(deletedSession.personaId);
+      }
+    } catch (caughtError) {
+      toast.error(getErrorMessage(caughtError));
+    } finally {
+      setIsDeletingSession(false);
+    }
+  }
+
+  const canSend = Boolean(input.trim()) && !isStreaming && !isStartingSession;
 
   return (
-    <div className="grid h-dvh max-h-dvh overflow-hidden bg-background text-foreground lg:grid-cols-[18rem_minmax(0,1fr)_20rem]">
-      <aside className="hidden min-h-0 overflow-hidden border-r bg-sidebar text-sidebar-foreground lg:block">
+    <div
+      className={cn(
+        "grid h-dvh max-h-dvh overflow-hidden bg-muted/25 text-foreground lg:grid-cols-[18rem_minmax(0,1fr)]",
+        showProfileRail && "xl:grid-cols-[18rem_minmax(0,1fr)_17rem]",
+      )}
+    >
+      <aside className="hidden min-h-0 min-w-0 overflow-hidden border-r bg-sidebar/95 text-sidebar-foreground lg:block">
         <PersonaLibrary
           activePersonaId={activePersona}
           activeSessionId={sessionId}
@@ -436,14 +546,15 @@ export function ChatWindow() {
           personas={personas}
           sessions={sessions}
           onCreate={openCreatePersona}
-          onNewChat={(personaId) => void startNewSession(personaId)}
+          onDeleteSession={setSessionBeingDeleted}
+          onNewChat={startNewDraft}
           onSelectPersona={(personaId) => void openLatestSessionForPersona(personaId)}
           onSelectSession={(nextSessionId) => void openSession(nextSessionId)}
         />
       </aside>
 
-      <section className="flex min-h-0 min-w-0 flex-col overflow-hidden">
-        <header className="flex h-16 shrink-0 items-center justify-between gap-3 border-b bg-background/95 px-4">
+      <section className="flex min-h-0 min-w-0 flex-col overflow-hidden bg-background">
+        <header className="flex h-16 shrink-0 items-center justify-between gap-3 border-b bg-background/95 px-4 backdrop-blur">
           <div className="flex min-w-0 items-center gap-3">
             <Sheet open={isMobileLibraryOpen} onOpenChange={setIsMobileLibraryOpen}>
               <SheetTrigger render={<Button variant="ghost" size="icon-sm" className="lg:hidden" />}>
@@ -465,9 +576,13 @@ export function ChatWindow() {
                     setIsMobileLibraryOpen(false);
                     openCreatePersona();
                   }}
+                  onDeleteSession={(session) => {
+                    setIsMobileLibraryOpen(false);
+                    setSessionBeingDeleted(session);
+                  }}
                   onNewChat={(personaId) => {
                     setIsMobileLibraryOpen(false);
-                    void startNewSession(personaId);
+                    startNewDraft(personaId);
                   }}
                   onSelectPersona={(personaId) => {
                     setIsMobileLibraryOpen(false);
@@ -484,7 +599,7 @@ export function ChatWindow() {
             <div className="min-w-0">
               <h1 className="truncate text-sm font-semibold">{currentPersona.name}</h1>
               <p className="truncate text-xs text-muted-foreground">
-                {currentPersona.tagline ?? "Ready to chat"}
+                {sessionId ? currentPersona.tagline ?? "Conversation open" : "Draft chat ready"}
               </p>
             </div>
           </div>
@@ -498,12 +613,28 @@ export function ChatWindow() {
               variant="outline"
               size="sm"
               disabled={isStreaming || isStartingSession}
-              onClick={() => void startNewSession(activePersona)}
+              onClick={() => startNewDraft(activePersona)}
             >
               <PlusIcon />
               New chat
             </Button>
             <ThemeToggle />
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label="Open settings"
+                    onClick={() => setIsSettingsOpen(true)}
+                  />
+                }
+              >
+                <SettingsIcon />
+              </TooltipTrigger>
+              <TooltipContent>Settings</TooltipContent>
+            </Tooltip>
             <Tooltip>
               <TooltipTrigger
                 render={
@@ -531,7 +662,7 @@ export function ChatWindow() {
           </div>
         </header>
 
-        <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        <main className="flex min-h-0 flex-1 flex-col overflow-hidden bg-[radial-gradient(circle_at_top,_var(--muted),_transparent_28rem)]">
           {error ? (
             <Alert variant="destructive" className="m-4">
               <AlertCircleIcon />
@@ -543,7 +674,12 @@ export function ChatWindow() {
           <MessageScrollerProvider>
             <MessageScroller className="min-h-0 flex-1">
               <MessageScrollerViewport>
-                <MessageScrollerContent className="mx-auto w-full max-w-3xl gap-4 px-4 py-6">
+                <MessageScrollerContent
+                  className={cn(
+                    "mx-auto w-full max-w-3xl px-4",
+                    isCompactMode ? "gap-2 py-3" : "gap-4 py-6",
+                  )}
+                >
                   {messages.length === 0 ? (
                     <EmptyChat
                       isStartingSession={isStartingSession}
@@ -592,7 +728,12 @@ export function ChatWindow() {
 
           <form onSubmit={handleSubmit} className="border-t bg-background p-3">
             <div className="mx-auto flex max-w-3xl items-end gap-2">
+              <Label htmlFor="chat-message" className="sr-only">
+                Message
+              </Label>
               <Textarea
+                id="chat-message"
+                name="message"
                 value={input}
                 onChange={(event) => setInput(event.target.value)}
                 onKeyDown={(event) => {
@@ -602,8 +743,8 @@ export function ChatWindow() {
                   }
                 }}
                 disabled={isStartingSession}
-                placeholder={`Message ${currentPersona.name}`}
-                className="max-h-36 min-h-12 flex-1"
+                placeholder={`Message ${currentPersona.name}…`}
+                className="max-h-36 min-h-12 flex-1 bg-background shadow-sm"
               />
               <Button type="submit" size="icon-lg" disabled={!canSend} aria-label="Send message">
                 {isStreaming ? <Spinner /> : <SendIcon />}
@@ -613,7 +754,12 @@ export function ChatWindow() {
         </main>
       </section>
 
-      <aside className="hidden min-h-0 overflow-hidden border-l bg-muted/20 lg:block">
+      <aside
+        className={cn(
+          "hidden min-h-0 overflow-hidden border-l bg-background/80 xl:block",
+          !showProfileRail && "xl:hidden",
+        )}
+      >
         <PersonaDetails
           persona={currentPersona}
           onCreate={openCreatePersona}
@@ -621,6 +767,19 @@ export function ChatWindow() {
           onEdit={openEditPersona}
         />
       </aside>
+
+      <SettingsDialog
+        compactMode={isCompactMode}
+        model={preferredModel}
+        open={isSettingsOpen}
+        personalApiKey={personalApiKey}
+        showProfileRail={showProfileRail}
+        onCompactModeChange={setIsCompactMode}
+        onModelChange={setPreferredModel}
+        onOpenChange={setIsSettingsOpen}
+        onPersonalApiKeyChange={setPersonalApiKey}
+        onShowProfileRailChange={setShowProfileRail}
+      />
 
       <PersonaEditorDialog
         key={`${dialogMode}-${personaBeingEdited?.id ?? "new"}-${isPersonaDialogOpen}`}
@@ -666,6 +825,42 @@ export function ChatWindow() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <Dialog
+        open={Boolean(sessionBeingDeleted)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setSessionBeingDeleted(null);
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete chat?</DialogTitle>
+            <DialogDescription>
+              This removes the conversation and its messages. This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setSessionBeingDeleted(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={isDeletingSession}
+              onClick={() => void handleDeleteSession()}
+            >
+              {isDeletingSession ? <Spinner /> : <Trash2Icon />}
+              Delete chat
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -678,6 +873,7 @@ function PersonaLibrary({
   personas,
   sessions,
   onCreate,
+  onDeleteSession,
   onNewChat,
   onSelectPersona,
   onSelectSession,
@@ -689,6 +885,7 @@ function PersonaLibrary({
   personas: PersonaOption[];
   sessions: SessionSummary[];
   onCreate: () => void;
+  onDeleteSession: (session: SessionSummary) => void;
   onNewChat: (personaId: string) => void;
   onSelectPersona: (personaId: string) => void;
   onSelectSession: (sessionId: string) => void;
@@ -704,78 +901,279 @@ function PersonaLibrary({
           <PlusIcon />
         </Button>
       </div>
-      <ScrollArea className="min-h-0 flex-1 p-3">
-        <div className="grid gap-3">
+      <ScrollArea className="min-h-0 flex-1 p-2">
+        <div className="grid min-w-0 gap-2">
           {isLoading
             ? Array.from({ length: 4 }).map((_, index) => (
-                <Skeleton key={index} className="h-16 rounded-2xl" />
+                <Skeleton key={index} className="h-20 rounded-lg" />
               ))
             : personas.map((persona) => {
                 const personaSessions = sessions
                   .filter((session) => session.personaId === persona.id)
-                  .slice(0, 5);
+                  .slice(0, 6);
+                const isActivePersona = persona.id === activePersonaId;
+                const hasActiveSession = personaSessions.some(
+                  (session) => session.id === activeSessionId,
+                );
 
                 return (
-                  <div key={persona.id} className="rounded-2xl border bg-background/60 p-2">
-                    <button
-                      type="button"
-                      disabled={disabled}
-                      onClick={() => onSelectPersona(persona.id)}
-                      className={cn(
-                        "flex w-full min-w-0 items-center gap-3 rounded-xl p-2 text-left transition hover:bg-muted disabled:opacity-60",
-                        persona.id === activePersonaId && "bg-muted",
-                      )}
-                    >
-                      <PersonaAvatar persona={persona} />
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-sm font-medium">{persona.name}</span>
-                        <span className="block truncate text-xs text-muted-foreground">
-                          {persona.tagline ??
-                            (persona.isBuiltIn ? "Example persona" : "Custom persona")}
-                        </span>
-                      </span>
-                      {persona.isBuiltIn ? <Badge variant="secondary">Example</Badge> : null}
-                    </button>
-
-                    <div className="mt-1 grid gap-1 pl-11">
-                      {personaSessions.length > 0 ? (
-                        personaSessions.map((session) => (
-                          <button
-                            key={session.id}
+                  <Collapsible
+                    key={persona.id}
+                    defaultOpen={isActivePersona || hasActiveSession}
+                    className="min-w-0 overflow-hidden rounded-lg border bg-background/70 shadow-sm"
+                  >
+                    <div className="flex min-w-0 items-center gap-1 p-1.5">
+                      <CollapsibleTrigger
+                        render={
+                          <Button
                             type="button"
-                            disabled={disabled}
-                            onClick={() => onSelectSession(session.id)}
-                            className={cn(
-                              "min-w-0 truncate rounded-xl px-2 py-1.5 text-left text-xs text-muted-foreground transition hover:bg-muted hover:text-foreground disabled:opacity-60",
-                              session.id === activeSessionId && "bg-muted text-foreground",
-                            )}
-                          >
-                            {session.title}
-                          </button>
-                        ))
-                      ) : (
-                        <div className="px-2 py-1.5 text-xs text-muted-foreground">
-                          No chats yet
-                        </div>
-                      )}
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="xs"
-                        className="w-fit justify-start px-2"
-                        disabled={disabled}
-                        onClick={() => onNewChat(persona.id)}
+                            variant="ghost"
+                            size="icon-sm"
+                            className="shrink-0 text-muted-foreground"
+                            aria-label={`Toggle ${persona.name} chats`}
+                          />
+                        }
                       >
-                        <PlusIcon />
-                        New chat
-                      </Button>
+                        <ChevronDownIcon />
+                      </CollapsibleTrigger>
+                      <button
+                        type="button"
+                        disabled={disabled}
+                        onClick={() => onSelectPersona(persona.id)}
+                        className={cn(
+                          "flex min-w-0 flex-1 items-center gap-2 rounded-md p-2 text-left transition hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60",
+                          isActivePersona && "bg-muted",
+                        )}
+                      >
+                        <PersonaAvatar persona={persona} />
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-sm font-medium">{persona.name}</span>
+                          <span className="block truncate text-xs text-muted-foreground">
+                            {persona.tagline ??
+                              (persona.isBuiltIn ? "Example persona" : "Custom persona")}
+                          </span>
+                        </span>
+                        {persona.isBuiltIn ? <Badge variant="secondary">Example</Badge> : null}
+                      </button>
                     </div>
-                  </div>
+
+                    <CollapsibleContent>
+                      <div className="grid min-w-0 gap-1 px-1.5 pb-2 pl-8">
+                        {personaSessions.length > 0 ? (
+                          personaSessions.map((session) => (
+                            <ChatHistoryRow
+                              key={session.id}
+                              disabled={disabled}
+                              isActive={session.id === activeSessionId}
+                              session={session}
+                              onDelete={onDeleteSession}
+                              onSelect={onSelectSession}
+                            />
+                          ))
+                        ) : (
+                          <div className="rounded-md border border-dashed px-3 py-3 text-xs text-muted-foreground">
+                            No saved chats yet.
+                          </div>
+                        )}
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="xs"
+                          className="mt-1 w-fit justify-start px-2"
+                          disabled={disabled}
+                          onClick={() => onNewChat(persona.id)}
+                        >
+                          <PlusIcon />
+                          New chat
+                        </Button>
+                      </div>
+                    </CollapsibleContent>
+                  </Collapsible>
                 );
               })}
         </div>
       </ScrollArea>
     </div>
+  );
+}
+
+function ChatHistoryRow({
+  disabled,
+  isActive,
+  onDelete,
+  onSelect,
+  session,
+}: {
+  disabled: boolean;
+  isActive: boolean;
+  onDelete: (session: SessionSummary) => void;
+  onSelect: (sessionId: string) => void;
+  session: SessionSummary;
+}) {
+  const title = session.title === "New chat" ? "Untitled chat" : session.title;
+
+  return (
+    <div
+      className={cn(
+        "group flex min-w-0 max-w-full items-start gap-1 overflow-hidden rounded-md transition hover:bg-muted",
+        isActive && "bg-muted text-foreground",
+      )}
+    >
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => onSelect(session.id)}
+        className="min-w-0 flex-1 overflow-hidden rounded-md px-2.5 py-2 text-left focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
+      >
+        <span className="flex min-w-0 items-center gap-2">
+          <MessageSquareIcon className="size-3.5 shrink-0 text-muted-foreground" />
+          <span className="truncate text-xs font-medium">{title}</span>
+        </span>
+        <span className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">
+          {session.preview ?? "Saved conversation."}
+        </span>
+        <span className="mt-1 block text-[11px] text-muted-foreground">
+          {formatSessionDate(session.updatedAt ?? session.createdAt)}
+        </span>
+      </button>
+
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-sm"
+        disabled={disabled}
+        className="mt-1 shrink-0 text-muted-foreground hover:text-destructive"
+        aria-label={`Delete ${title}`}
+        onClick={() => onDelete(session)}
+      >
+        <Trash2Icon />
+      </Button>
+    </div>
+  );
+}
+
+function SettingsDialog({
+  compactMode,
+  model,
+  onCompactModeChange,
+  onModelChange,
+  onOpenChange,
+  onPersonalApiKeyChange,
+  onShowProfileRailChange,
+  open,
+  personalApiKey,
+  showProfileRail,
+}: {
+  compactMode: boolean;
+  model: string;
+  onCompactModeChange: (enabled: boolean) => void;
+  onModelChange: (model: string) => void;
+  onOpenChange: (open: boolean) => void;
+  onPersonalApiKeyChange: (apiKey: string) => void;
+  onShowProfileRailChange: (enabled: boolean) => void;
+  open: boolean;
+  personalApiKey: string;
+  showProfileRail: boolean;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Settings</DialogTitle>
+          <DialogDescription>
+            Tune the chat layout and use your own OpenRouter credentials for messages.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="grid gap-5">
+          <div className="grid gap-3 rounded-lg border p-3">
+            <div className="flex items-center gap-2 text-sm font-medium">
+              <PanelRightIcon className="size-4 text-muted-foreground" />
+              Interface
+            </div>
+            <SettingSwitch
+              checked={compactMode}
+              description="Reduce vertical spacing in the conversation."
+              label="Compact Chat"
+              onCheckedChange={onCompactModeChange}
+            />
+            <SettingSwitch
+              checked={showProfileRail}
+              description="Show the persona profile panel on wide screens."
+              label="Profile Rail"
+              onCheckedChange={onShowProfileRailChange}
+            />
+          </div>
+
+          <div className="grid gap-3 rounded-lg border p-3">
+            <div className="flex items-center gap-2 text-sm font-medium">
+              <KeyRoundIcon className="size-4 text-muted-foreground" />
+              OpenRouter
+            </div>
+            <div className="grid gap-1.5">
+              <Label htmlFor="settings-openrouter-key">API Key</Label>
+              <Input
+                id="settings-openrouter-key"
+                name="openrouter-api-key"
+                type="password"
+                autoComplete="off"
+                value={personalApiKey}
+                onChange={(event) => onPersonalApiKeyChange(event.target.value)}
+                placeholder="sk-or-…"
+              />
+              <p className="text-xs text-muted-foreground">
+                Stored in this browser and sent only with chat requests.
+              </p>
+            </div>
+            <div className="grid gap-1.5">
+              <Label htmlFor="settings-openrouter-model">Model</Label>
+              <Input
+                id="settings-openrouter-model"
+                name="openrouter-model"
+                autoComplete="off"
+                value={model}
+                onChange={(event) => onModelChange(event.target.value)}
+                placeholder="openai/gpt-4o"
+              />
+            </div>
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button type="button" onClick={() => onOpenChange(false)}>
+            Done
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function SettingSwitch({
+  checked,
+  description,
+  label,
+  onCheckedChange,
+}: {
+  checked: boolean;
+  description: string;
+  label: string;
+  onCheckedChange: (checked: boolean) => void;
+}) {
+  return (
+    <label className="flex cursor-pointer items-center justify-between gap-3 rounded-md p-2 hover:bg-muted">
+      <span className="min-w-0">
+        <span className="block text-sm font-medium">{label}</span>
+        <span className="block text-xs leading-5 text-muted-foreground">
+          {description}
+        </span>
+      </span>
+      <Switch
+        checked={checked}
+        onCheckedChange={onCheckedChange}
+        aria-label={label}
+      />
+    </label>
   );
 }
 
@@ -883,9 +1281,9 @@ function EmptyChat({
     <div className="flex min-h-72 flex-1 items-center justify-center">
       <div className="w-full max-w-xl text-center">
         <PersonaAvatar persona={persona} size="lg" className="mx-auto mb-4 size-16" />
-        <h2 className="text-xl font-semibold">{persona.name} is ready.</h2>
+        <h2 className="text-xl font-semibold text-pretty">Start a chat with {persona.name}</h2>
         <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-muted-foreground">
-          {persona.bio ?? persona.tagline ?? "Start with a prompt or ask anything in this persona's style."}
+          {persona.bio ?? persona.tagline ?? "Pick a starter or write anything in the composer."}
         </p>
         <div className="mt-5 grid gap-2 sm:grid-cols-3">
           {prompts.slice(0, 3).map((prompt) => (
@@ -893,7 +1291,7 @@ function EmptyChat({
               key={prompt}
               type="button"
               variant="outline"
-              className="h-auto min-h-16 whitespace-normal rounded-2xl text-wrap"
+              className="h-auto min-h-16 whitespace-normal rounded-lg bg-background/80 text-wrap shadow-sm"
               onClick={() => onPromptClick(prompt)}
             >
               {prompt}
@@ -1407,6 +1805,31 @@ async function readJsonError(response: Response) {
 
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Something went wrong.";
+}
+
+function readStoredSetting(key: string) {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  return window.localStorage.getItem(key);
+}
+
+function formatSessionDate(value: string | null) {
+  if (!value) {
+    return "No date";
+  }
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return "No date";
+  }
+
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+  }).format(date);
 }
 
 function getInitials(name: string) {

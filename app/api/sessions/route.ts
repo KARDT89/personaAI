@@ -1,7 +1,7 @@
 import { and, desc, eq, or } from "drizzle-orm";
 
 import { requireUser } from "@/lib/auth-utils";
-import { personas, sessions } from "@/lib/db/schema";
+import { messages, personas, sessions } from "@/lib/db/schema";
 
 export async function GET(req: Request) {
   const user = await requireUser(req);
@@ -32,11 +32,32 @@ export async function GET(req: Request) {
       ),
     )
     .orderBy(desc(sessions.updatedAt));
+  const previews = await Promise.all(
+    rows.map(async (session) => {
+      const [latestMessage] = await db
+        .select({
+          content: messages.content,
+        })
+        .from(messages)
+        .where(eq(messages.sessionId, session.id))
+        .orderBy(desc(messages.createdAt))
+        .limit(1);
+
+      return [session.id, buildPreview(latestMessage?.content)] as const;
+    }),
+  );
+  const previewBySessionId = new Map(previews);
+  const visibleRows = rows.filter((session) => {
+    const preview = previewBySessionId.get(session.id);
+
+    return session.title !== "New chat" || Boolean(preview);
+  });
 
   return Response.json({
-    sessions: rows.map((session) => ({
+    sessions: visibleRows.map((session) => ({
       id: session.id,
       title: session.title,
+      preview: previewBySessionId.get(session.id) ?? null,
       personaId: session.personaId,
       createdAt: session.createdAt?.toISOString() ?? null,
       updatedAt: session.updatedAt?.toISOString() ?? null,
@@ -49,6 +70,16 @@ export async function GET(req: Request) {
       },
     })),
   });
+}
+
+function buildPreview(content?: string | null) {
+  const preview = content?.replace(/\s+/g, " ").trim();
+
+  if (!preview) {
+    return null;
+  }
+
+  return preview.length > 96 ? `${preview.slice(0, 93)}…` : preview;
 }
 
 export async function POST(req: Request) {

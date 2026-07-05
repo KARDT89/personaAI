@@ -6,6 +6,7 @@ export type LlmMessage = {
 };
 
 type ChatRequest = {
+  apiKey?: string;
   system?: string;
   messages: LlmMessage[];
   model?: string;
@@ -23,7 +24,7 @@ export function getOpenRouterModel() {
 export async function createChatCompletion(request: ChatRequest) {
   const response = await fetch(OPENROUTER_CHAT_COMPLETIONS_URL, {
     method: "POST",
-    headers: getHeaders(),
+    headers: getHeaders(request.apiKey),
     body: JSON.stringify({
       model: request.model ?? getOpenRouterModel(),
       messages: [
@@ -56,11 +57,11 @@ export async function createChatCompletionText(request: ChatRequest) {
   return data.choices?.[0]?.message?.content?.trim() ?? "";
 }
 
-function getHeaders() {
-  const apiKey = process.env.OPENROUTER_API_KEY;
+function getHeaders(apiKeyOverride?: string) {
+  const apiKey = apiKeyOverride || process.env.OPENROUTER_API_KEY;
 
   if (!apiKey) {
-    throw new Error("OPENROUTER_API_KEY is required.");
+    throw new Error("Add an OpenRouter API key in Settings or configure OPENROUTER_API_KEY.");
   }
 
   const headers: Record<string, string> = {

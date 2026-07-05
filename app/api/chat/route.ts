@@ -74,6 +74,8 @@ export async function POST(req: Request) {
 
   try {
     llmResponse = await createChatCompletion({
+      apiKey: input.apiKey,
+      model: input.model,
       system: systemPrompt,
       messages: [...history, { role: "user", content: input.message }],
       stream: true,
@@ -111,7 +113,7 @@ export async function POST(req: Request) {
 function buildSessionTitle(message: string) {
   const title = message.replace(/\s+/g, " ").trim();
 
-  return title.length > 64 ? `${title.slice(0, 61)}...` : title || "New chat";
+  return title.length > 64 ? `${title.slice(0, 61)}…` : title || "New chat";
 }
 
 function parseChatRequest(body: unknown) {
@@ -134,6 +136,10 @@ function parseChatRequest(body: unknown) {
     sessionId: payload.sessionId,
     personaId: payload.personaId,
     message: payload.message.trim(),
+    apiKey:
+      typeof payload.apiKey === "string" ? payload.apiKey.trim() || undefined : undefined,
+    model:
+      typeof payload.model === "string" ? payload.model.trim() || undefined : undefined,
   };
 }
 
