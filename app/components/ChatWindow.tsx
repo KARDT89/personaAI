@@ -1362,7 +1362,7 @@ export function ChatWindow() {
                 <MessageScrollerContent
                   className={cn(
                     "mx-auto w-full max-w-4xl px-4 sm:px-6",
-                    isCompactMode ? "gap-2 py-3" : "gap-4 py-6",
+                    isCompactMode ? "gap-1.5 py-3" : "gap-4 py-6",
                   )}
                 >
                   {visibleMessages.length === 0 ? (
@@ -1381,15 +1381,22 @@ export function ChatWindow() {
                       />
                     )
                   ) : (
-                    <MessageGroup className="flex w-full gap-4">
+                    <MessageGroup
+                      className={cn("flex w-full", isCompactMode ? "gap-1.5" : "gap-4")}
+                    >
                       {visibleMessages.map((message) => (
-                          <MessageScrollerItem key={message.id} className="animate-message-in">
+                        <MessageScrollerItem key={message.id} className="animate-message-in">
                           <Message
                             align={message.role === "user" ? "end" : "start"}
                             className="min-w-0"
                           >
-                            <MessageContent className="min-w-0 max-w-[min(42rem,85%)]">
-                              <MessageHeader>
+                            <MessageContent
+                              className={cn(
+                                "min-w-0 max-w-[min(42rem,85%)]",
+                                isCompactMode && "gap-1",
+                              )}
+                            >
+                              <MessageHeader className={isCompactMode ? "px-2 text-[0.7rem]" : undefined}>
                                 {message.role === "user"
                                   ? "You"
                                   : activeMode === "learning"
@@ -1404,6 +1411,7 @@ export function ChatWindow() {
                                 <BubbleContent
                                   className={cn(
                                     "min-w-0 max-w-full whitespace-pre-wrap break-words shadow-sm transition-shadow duration-200 [overflow-wrap:anywhere] group-hover/message:shadow-md",
+                                    isCompactMode && "rounded-2xl px-2.5 py-1.5 text-[0.8125rem] leading-5",
                                     !message.content && "min-h-10 min-w-16 animate-soft-shimmer",
                                   )}
                                 >
@@ -3685,7 +3693,7 @@ function LearningSourceDialog({
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="flex max-h-[92dvh] flex-col overflow-hidden p-0 sm:max-w-4xl">
-        <DialogHeader className="border-b p-6 pb-4">
+        <DialogHeader className="shrink-0 border-b p-6 pb-4 pr-14">
           <DialogTitle>Source Import Studio</DialogTitle>
           <DialogDescription>
             Build a study-ready source with extraction, chunking, embeddings, and citation hints.
@@ -3696,8 +3704,12 @@ function LearningSourceDialog({
           {savedSource ? (
             <SourceReadyPanel source={savedSource} prompts={readyPrompts} />
           ) : (
-            <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
-              <Tabs value={kind} onValueChange={(value) => setKind(value as LearningSourceKind)}>
+            <div className="grid min-w-0 gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(17rem,20rem)]">
+              <Tabs
+                value={kind}
+                className="min-w-0"
+                onValueChange={(value) => setKind(value as LearningSourceKind)}
+              >
                 <TabsList className="grid w-full grid-cols-2">
                   <TabsTrigger value="book_pdf">Book PDF</TabsTrigger>
                   <TabsTrigger value="podcast_transcript">Podcast Transcript</TabsTrigger>
@@ -3805,7 +3817,7 @@ function LearningSourceDialog({
           )}
         </div>
 
-        <DialogFooter className="border-t bg-popover p-4">
+        <DialogFooter className="shrink-0 border-t bg-popover p-4">
           {savedSource ? (
             <Button type="button" onClick={handleStartStudying}>
               <SparklesIcon />
