@@ -59,6 +59,16 @@ export async function POST(req: Request) {
     role: "user",
     content: input.message,
   });
+  await db
+    .update(sessions)
+    .set({
+      title:
+        session.title === "New chat"
+          ? buildSessionTitle(input.message)
+          : session.title,
+      updatedAt: new Date(),
+    })
+    .where(eq(sessions.id, input.sessionId));
 
   let llmResponse: Response;
 
@@ -96,6 +106,12 @@ export async function POST(req: Request) {
       "Content-Type": "text/plain; charset=utf-8",
     },
   });
+}
+
+function buildSessionTitle(message: string) {
+  const title = message.replace(/\s+/g, " ").trim();
+
+  return title.length > 64 ? `${title.slice(0, 61)}...` : title || "New chat";
 }
 
 function parseChatRequest(body: unknown) {
@@ -224,6 +240,10 @@ function streamAssistantText(
             role: "assistant",
             content: assistantText,
           });
+          await db
+            .update(sessions)
+            .set({ updatedAt: new Date() })
+            .where(eq(sessions.id, sessionId));
           await refreshMemorySummary(sessionId).catch((error) => {
             console.error("Failed to refresh memory summary.", error);
           });

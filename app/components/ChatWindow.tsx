@@ -38,6 +38,14 @@ import {
   MessageGroup,
   MessageHeader,
 } from "@/components/ui/message";
+import {
+  MessageScroller,
+  MessageScrollerButton,
+  MessageScrollerContent,
+  MessageScrollerItem,
+  MessageScrollerProvider,
+  MessageScrollerViewport,
+} from "@/components/ui/message-scroller";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
@@ -81,6 +89,21 @@ type PersonaResponse = {
   error?: string;
 };
 
+type SessionSummary = {
+  id: string;
+  title: string;
+  personaId: string;
+  createdAt: string | null;
+  updatedAt: string | null;
+};
+
+type SessionsResponse = {
+  sessions?: SessionSummary[];
+  session?: SessionSummary;
+  messages?: ChatMessage[];
+  error?: string;
+};
+
 type SourceType = "youtube-transcript" | "whatsapp-chat" | "other";
 type PersonaDialogMode = "create" | "edit";
 type PersonaDialogStep = "source" | "review";
@@ -106,10 +129,12 @@ export function ChatWindow() {
   const [personas, setPersonas] = useState<PersonaOption[]>(FALLBACK_PERSONAS);
   const [activePersona, setActivePersona] = useState("hitesh");
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isLoadingPersonas, setIsLoadingPersonas] = useState(true);
+  const [isLoadingSessions, setIsLoadingSessions] = useState(true);
   const [isStartingSession, setIsStartingSession] = useState(true);
   const [isStreaming, setIsStreaming] = useState(false);
   const [isMobileLibraryOpen, setIsMobileLibraryOpen] = useState(false);
@@ -120,12 +145,58 @@ export function ChatWindow() {
   const [isDeletingPersona, setIsDeletingPersona] = useState(false);
   const didInitRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
-  const endRef = useRef<HTMLDivElement | null>(null);
 
   const currentPersona =
     personas.find((persona) => persona.id === activePersona) ?? personas[0] ?? FALLBACK_PERSONAS[0];
 
-  const createSession = useCallback(async (personaId: string) => {
+  const loadSessions = useCallback(async () => {
+    setIsLoadingSessions(true);
+
+    try {
+      const response = await fetch("/api/sessions");
+      const data = (await response.json()) as SessionsResponse;
+
+      if (!response.ok) {
+        throw new Error(data.error ?? "Could not load sessions.");
+      }
+
+      setSessions(data.sessions ?? []);
+      return data.sessions ?? [];
+    } catch (caughtError) {
+      setError(getErrorMessage(caughtError));
+      return [];
+    } finally {
+      setIsLoadingSessions(false);
+    }
+  }, []);
+
+  const openSession = useCallback(async (nextSessionId: string) => {
+    abortRef.current?.abort();
+    abortRef.current = null;
+    setIsStartingSession(true);
+    setIsStreaming(false);
+    setError(null);
+    setMessages([]);
+
+    try {
+      const response = await fetch(`/api/sessions/${nextSessionId}`);
+      const data = (await response.json()) as SessionsResponse;
+
+      if (!response.ok || !data.session) {
+        throw new Error(data.error ?? "Could not open session.");
+      }
+
+      setActivePersona(data.session.personaId);
+      setSessionId(data.session.id);
+      setMessages(data.messages ?? []);
+    } catch (caughtError) {
+      setError(getErrorMessage(caughtError));
+    } finally {
+      setIsStartingSession(false);
+    }
+  }, []);
+
+  const startNewSession = useCallback(async (personaId: string) => {
     abortRef.current?.abort();
     abortRef.current = null;
     setIsStartingSession(true);
@@ -136,24 +207,40 @@ export function ChatWindow() {
     setActivePersona(personaId);
 
     try {
-      const response = await fetch("/api/persona", {
+      const response = await fetch("/api/sessions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ personaId }),
       });
-      const data = (await response.json()) as PersonaResponse;
+      const data = (await response.json()) as SessionsResponse;
 
-      if (!response.ok || !data.sessionId) {
+      if (!response.ok || !data.session) {
         throw new Error(data.error ?? "Could not start session.");
       }
 
-      setSessionId(data.sessionId);
+      setSessionId(data.session.id);
+      await loadSessions();
     } catch (caughtError) {
       setError(getErrorMessage(caughtError));
     } finally {
       setIsStartingSession(false);
     }
-  }, []);
+  }, [loadSessions]);
+
+  const openLatestSessionForPersona = useCallback(
+    async (personaId: string) => {
+      setActivePersona(personaId);
+      const latestSession = sessions.find((session) => session.personaId === personaId);
+
+      if (latestSession) {
+        await openSession(latestSession.id);
+        return;
+      }
+
+      await startNewSession(personaId);
+    },
+    [openSession, sessions, startNewSession],
+  );
 
   const loadPersonas = useCallback(async () => {
     setIsLoadingPersonas(true);
@@ -185,15 +272,21 @@ export function ChatWindow() {
 
     async function boot() {
       const loadedPersonas = await loadPersonas();
-      await createSession(loadedPersonas[0]?.id ?? "hitesh");
+      const loadedSessions = await loadSessions();
+      const firstPersonaId = loadedPersonas[0]?.id ?? "hitesh";
+      const latestSession = loadedSessions.find(
+        (session) => session.personaId === firstPersonaId,
+      );
+
+      if (latestSession) {
+        await openSession(latestSession.id);
+      } else {
+        await startNewSession(firstPersonaId);
+      }
     }
 
     void boot();
-  }, [createSession, loadPersonas]);
-
-  useEffect(() => {
-    endRef.current?.scrollIntoView({ block: "end" });
-  }, [messages, isStreaming]);
+  }, [loadPersonas, loadSessions, openSession, startNewSession]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -275,6 +368,7 @@ export function ChatWindow() {
     } finally {
       setIsStreaming(false);
       abortRef.current = null;
+      await loadSessions();
     }
   }
 
@@ -295,7 +389,7 @@ export function ChatWindow() {
     const nextPersona = loadedPersonas.find((item) => item.id === persona.id) ?? persona;
     setIsPersonaDialogOpen(false);
     setPersonaBeingEdited(null);
-    await createSession(nextPersona.id);
+    await startNewSession(nextPersona.id);
   }
 
   async function handleDeletePersona() {
@@ -320,7 +414,7 @@ export function ChatWindow() {
       setPersonaBeingDeleted(null);
 
       if (personaBeingDeleted.id === activePersona) {
-        await createSession(loadedPersonas[0]?.id ?? "hitesh");
+        await startNewSession(loadedPersonas[0]?.id ?? "hitesh");
       }
     } catch (caughtError) {
       toast.error(getErrorMessage(caughtError));
@@ -332,19 +426,23 @@ export function ChatWindow() {
   const canSend = Boolean(input.trim()) && Boolean(sessionId) && !isStreaming;
 
   return (
-    <div className="grid min-h-dvh bg-background text-foreground lg:grid-cols-[18rem_minmax(0,1fr)_20rem]">
-      <aside className="hidden border-r bg-sidebar text-sidebar-foreground lg:block">
+    <div className="grid h-dvh max-h-dvh overflow-hidden bg-background text-foreground lg:grid-cols-[18rem_minmax(0,1fr)_20rem]">
+      <aside className="hidden min-h-0 overflow-hidden border-r bg-sidebar text-sidebar-foreground lg:block">
         <PersonaLibrary
           activePersonaId={activePersona}
+          activeSessionId={sessionId}
           disabled={isStreaming || isStartingSession}
-          isLoading={isLoadingPersonas}
+          isLoading={isLoadingPersonas || isLoadingSessions}
           personas={personas}
+          sessions={sessions}
           onCreate={openCreatePersona}
-          onSelect={(personaId) => void createSession(personaId)}
+          onNewChat={(personaId) => void startNewSession(personaId)}
+          onSelectPersona={(personaId) => void openLatestSessionForPersona(personaId)}
+          onSelectSession={(nextSessionId) => void openSession(nextSessionId)}
         />
       </aside>
 
-      <section className="flex min-h-dvh min-w-0 flex-col">
+      <section className="flex min-h-0 min-w-0 flex-col overflow-hidden">
         <header className="flex h-16 shrink-0 items-center justify-between gap-3 border-b bg-background/95 px-4">
           <div className="flex min-w-0 items-center gap-3">
             <Sheet open={isMobileLibraryOpen} onOpenChange={setIsMobileLibraryOpen}>
@@ -358,16 +456,26 @@ export function ChatWindow() {
                 </SheetHeader>
                 <PersonaLibrary
                   activePersonaId={activePersona}
+                  activeSessionId={sessionId}
                   disabled={isStreaming || isStartingSession}
-                  isLoading={isLoadingPersonas}
+                  isLoading={isLoadingPersonas || isLoadingSessions}
                   personas={personas}
+                  sessions={sessions}
                   onCreate={() => {
                     setIsMobileLibraryOpen(false);
                     openCreatePersona();
                   }}
-                  onSelect={(personaId) => {
+                  onNewChat={(personaId) => {
                     setIsMobileLibraryOpen(false);
-                    void createSession(personaId);
+                    void startNewSession(personaId);
+                  }}
+                  onSelectPersona={(personaId) => {
+                    setIsMobileLibraryOpen(false);
+                    void openLatestSessionForPersona(personaId);
+                  }}
+                  onSelectSession={(nextSessionId) => {
+                    setIsMobileLibraryOpen(false);
+                    void openSession(nextSessionId);
                   }}
                 />
               </SheetContent>
@@ -385,6 +493,16 @@ export function ChatWindow() {
             <Badge variant="outline" className="hidden sm:inline-flex">
               GPT-4o
             </Badge>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={isStreaming || isStartingSession}
+              onClick={() => void startNewSession(activePersona)}
+            >
+              <PlusIcon />
+              New chat
+            </Button>
             <ThemeToggle />
             <Tooltip>
               <TooltipTrigger
@@ -413,7 +531,7 @@ export function ChatWindow() {
           </div>
         </header>
 
-        <main className="flex min-h-0 flex-1 flex-col">
+        <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
           {error ? (
             <Alert variant="destructive" className="m-4">
               <AlertCircleIcon />
@@ -422,46 +540,55 @@ export function ChatWindow() {
             </Alert>
           ) : null}
 
-          <ScrollArea className="min-h-0 flex-1">
-            <MessageGroup className="mx-auto flex min-h-[calc(100dvh-9rem)] w-full max-w-3xl justify-end gap-4 px-4 py-6">
-              {messages.length === 0 ? (
-                <EmptyChat
-                  isStartingSession={isStartingSession}
-                  persona={currentPersona}
-                  onPromptClick={setInput}
-                />
-              ) : (
-                messages.map((message) => (
-                  <Message
-                    key={message.id}
-                    align={message.role === "user" ? "end" : "start"}
-                  >
-                    <MessageContent>
-                      <MessageHeader>
-                        {message.role === "user" ? "You" : currentPersona.name}
-                      </MessageHeader>
-                      <Bubble
-                        align={message.role === "user" ? "end" : "start"}
-                        variant={message.role === "user" ? "default" : "muted"}
-                      >
-                        <BubbleContent
-                          className={cn(
-                            "whitespace-pre-wrap",
-                            !message.content && "min-h-10 min-w-16",
-                          )}
-                        >
-                          {message.content || (
-                            <Spinner className="size-4 text-muted-foreground" />
-                          )}
-                        </BubbleContent>
-                      </Bubble>
-                    </MessageContent>
-                  </Message>
-                ))
-              )}
-              <div ref={endRef} />
-            </MessageGroup>
-          </ScrollArea>
+          <MessageScrollerProvider>
+            <MessageScroller className="min-h-0 flex-1">
+              <MessageScrollerViewport>
+                <MessageScrollerContent className="mx-auto w-full max-w-3xl gap-4 px-4 py-6">
+                  {messages.length === 0 ? (
+                    <EmptyChat
+                      isStartingSession={isStartingSession}
+                      persona={currentPersona}
+                      onPromptClick={setInput}
+                    />
+                  ) : (
+                    <MessageGroup className="flex w-full gap-4">
+                      {messages.map((message) => (
+                        <MessageScrollerItem key={message.id}>
+                          <Message
+                            align={message.role === "user" ? "end" : "start"}
+                            className="min-w-0"
+                          >
+                            <MessageContent className="min-w-0 max-w-[min(42rem,85%)]">
+                              <MessageHeader>
+                                {message.role === "user" ? "You" : currentPersona.name}
+                              </MessageHeader>
+                              <Bubble
+                                align={message.role === "user" ? "end" : "start"}
+                                variant={message.role === "user" ? "default" : "muted"}
+                              >
+                                <BubbleContent
+                                  className={cn(
+                                    "min-w-0 max-w-full whitespace-pre-wrap break-words [overflow-wrap:anywhere]",
+                                    !message.content && "min-h-10 min-w-16",
+                                  )}
+                                >
+                                  {message.content || (
+                                    <Spinner className="size-4 text-muted-foreground" />
+                                  )}
+                                </BubbleContent>
+                              </Bubble>
+                            </MessageContent>
+                          </Message>
+                        </MessageScrollerItem>
+                      ))}
+                    </MessageGroup>
+                  )}
+                  <MessageScrollerItem scrollAnchor />
+                </MessageScrollerContent>
+                <MessageScrollerButton />
+              </MessageScrollerViewport>
+            </MessageScroller>
+          </MessageScrollerProvider>
 
           <form onSubmit={handleSubmit} className="border-t bg-background p-3">
             <div className="mx-auto flex max-w-3xl items-end gap-2">
@@ -486,7 +613,7 @@ export function ChatWindow() {
         </main>
       </section>
 
-      <aside className="hidden border-l bg-muted/20 lg:block">
+      <aside className="hidden min-h-0 overflow-hidden border-l bg-muted/20 lg:block">
         <PersonaDetails
           persona={currentPersona}
           onCreate={openCreatePersona}
@@ -544,19 +671,27 @@ export function ChatWindow() {
 }
 
 function PersonaLibrary({
+  activeSessionId,
   activePersonaId,
   disabled,
   isLoading,
   personas,
+  sessions,
   onCreate,
-  onSelect,
+  onNewChat,
+  onSelectPersona,
+  onSelectSession,
 }: {
+  activeSessionId: string | null;
   activePersonaId: string;
   disabled: boolean;
   isLoading: boolean;
   personas: PersonaOption[];
+  sessions: SessionSummary[];
   onCreate: () => void;
-  onSelect: (personaId: string) => void;
+  onNewChat: (personaId: string) => void;
+  onSelectPersona: (personaId: string) => void;
+  onSelectSession: (sessionId: string) => void;
 }) {
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -570,32 +705,74 @@ function PersonaLibrary({
         </Button>
       </div>
       <ScrollArea className="min-h-0 flex-1 p-3">
-        <div className="grid gap-2">
+        <div className="grid gap-3">
           {isLoading
             ? Array.from({ length: 4 }).map((_, index) => (
                 <Skeleton key={index} className="h-16 rounded-2xl" />
               ))
-            : personas.map((persona) => (
-                <button
-                  key={persona.id}
-                  type="button"
-                  disabled={disabled}
-                  onClick={() => onSelect(persona.id)}
-                  className={cn(
-                    "flex min-w-0 items-center gap-3 rounded-2xl border p-3 text-left transition hover:bg-muted disabled:opacity-60",
-                    persona.id === activePersonaId && "border-primary bg-muted",
-                  )}
-                >
-                  <PersonaAvatar persona={persona} />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-medium">{persona.name}</span>
-                    <span className="block truncate text-xs text-muted-foreground">
-                      {persona.tagline ?? (persona.isBuiltIn ? "Example persona" : "Custom persona")}
-                    </span>
-                  </span>
-                  {persona.isBuiltIn ? <Badge variant="secondary">Example</Badge> : null}
-                </button>
-              ))}
+            : personas.map((persona) => {
+                const personaSessions = sessions
+                  .filter((session) => session.personaId === persona.id)
+                  .slice(0, 5);
+
+                return (
+                  <div key={persona.id} className="rounded-2xl border bg-background/60 p-2">
+                    <button
+                      type="button"
+                      disabled={disabled}
+                      onClick={() => onSelectPersona(persona.id)}
+                      className={cn(
+                        "flex w-full min-w-0 items-center gap-3 rounded-xl p-2 text-left transition hover:bg-muted disabled:opacity-60",
+                        persona.id === activePersonaId && "bg-muted",
+                      )}
+                    >
+                      <PersonaAvatar persona={persona} />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-medium">{persona.name}</span>
+                        <span className="block truncate text-xs text-muted-foreground">
+                          {persona.tagline ??
+                            (persona.isBuiltIn ? "Example persona" : "Custom persona")}
+                        </span>
+                      </span>
+                      {persona.isBuiltIn ? <Badge variant="secondary">Example</Badge> : null}
+                    </button>
+
+                    <div className="mt-1 grid gap-1 pl-11">
+                      {personaSessions.length > 0 ? (
+                        personaSessions.map((session) => (
+                          <button
+                            key={session.id}
+                            type="button"
+                            disabled={disabled}
+                            onClick={() => onSelectSession(session.id)}
+                            className={cn(
+                              "min-w-0 truncate rounded-xl px-2 py-1.5 text-left text-xs text-muted-foreground transition hover:bg-muted hover:text-foreground disabled:opacity-60",
+                              session.id === activeSessionId && "bg-muted text-foreground",
+                            )}
+                          >
+                            {session.title}
+                          </button>
+                        ))
+                      ) : (
+                        <div className="px-2 py-1.5 text-xs text-muted-foreground">
+                          No chats yet
+                        </div>
+                      )}
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="xs"
+                        className="w-fit justify-start px-2"
+                        disabled={disabled}
+                        onClick={() => onNewChat(persona.id)}
+                      >
+                        <PlusIcon />
+                        New chat
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
         </div>
       </ScrollArea>
     </div>
@@ -688,7 +865,7 @@ function EmptyChat({
 }) {
   if (isStartingSession) {
     return (
-      <div className="flex min-h-[calc(100dvh-12rem)] items-center justify-center">
+      <div className="flex min-h-72 flex-1 items-center justify-center">
         <Spinner className="size-5 text-muted-foreground" />
       </div>
     );
@@ -703,7 +880,7 @@ function EmptyChat({
       ];
 
   return (
-    <div className="flex min-h-[calc(100dvh-12rem)] items-center justify-center">
+    <div className="flex min-h-72 flex-1 items-center justify-center">
       <div className="w-full max-w-xl text-center">
         <PersonaAvatar persona={persona} size="lg" className="mx-auto mb-4 size-16" />
         <h2 className="text-xl font-semibold">{persona.name} is ready.</h2>

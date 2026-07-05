@@ -39,12 +39,15 @@ export const sessions = pgTable(
     personaId: text("persona_id")
       .notNull()
       .references(() => personas.id),
+    title: text("title").default("New chat").notNull(),
     memorySummary: text("memory_summary"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
   },
   (table) => [
     index("sessions_persona_id_idx").on(table.personaId),
     index("sessions_user_id_idx").on(table.userId),
+    index("sessions_user_updated_at_idx").on(table.userId, table.updatedAt),
   ],
 );
 

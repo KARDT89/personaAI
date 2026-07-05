@@ -65,7 +65,7 @@ export async function POST(req: Request) {
 
   const [session] = await db
     .insert(sessions)
-    .values({ personaId, userId: user.id })
+    .values({ personaId, userId: user.id, title: "New chat", updatedAt: new Date() })
     .returning({ id: sessions.id });
 
   return Response.json({
