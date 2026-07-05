@@ -108,7 +108,7 @@ export default function LandingPage() {
       </section>
 
       <footer className="border-t bg-background/90 px-4 py-5 text-center text-sm text-muted-foreground sm:px-6">
-        Made with care by DT89
+        Made with ❤️ by DT89
       </footer>
     </main>
   );
