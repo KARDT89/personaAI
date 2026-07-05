@@ -21,6 +21,7 @@ async function main() {
         set: {
           name: record.name,
           systemPrompt: record.systemPrompt,
+          personaJson: record.personaJson,
           ownerUserId: record.ownerUserId,
           isBuiltIn: record.isBuiltIn,
           avatarUrl: record.avatarUrl,

@@ -1,6 +1,7 @@
 import { requireUser } from "@/lib/auth-utils";
 import { createChatCompletionText } from "@/lib/llm/client";
 import type { PersonaData } from "@/lib/personas/promptBuilder";
+import { cleanStringArray, sanitizePersonaData, slugify } from "@/lib/personas/validation";
 
 type SourceType = "youtube-transcript" | "whatsapp-chat" | "other";
 
@@ -14,9 +15,9 @@ export async function POST(req: Request) {
   let body: unknown;
 
   try {
-    body = await req.json();
+    body = await parseRequestBody(req);
   } catch {
-    return Response.json({ error: "Invalid JSON body." }, { status: 400 });
+    return Response.json({ error: "Invalid request body." }, { status: 400 });
   }
 
   const payload = parseGenerateRequest(body);
@@ -41,6 +42,42 @@ export async function POST(req: Request) {
   const draft = parsePersonaDraft(content, payload.name, payload.sourceText);
 
   return Response.json({ persona: draft });
+}
+
+async function parseRequestBody(req: Request) {
+  const contentType = req.headers.get("content-type") ?? "";
+
+  if (contentType.includes("multipart/form-data")) {
+    const form = await req.formData();
+    const file = form.get("file");
+    const pastedText = form.get("sourceText");
+    const sourceText =
+      file instanceof File
+        ? await readTextFile(file)
+        : typeof pastedText === "string"
+          ? pastedText
+          : "";
+
+    return {
+      name: form.get("name"),
+      sourceType: form.get("sourceType"),
+      sourceText,
+    };
+  }
+
+  return req.json();
+}
+
+async function readTextFile(file: File) {
+  if (!file.name.toLowerCase().endsWith(".txt")) {
+    throw new Error("Only .txt files are supported.");
+  }
+
+  if (file.size > 2 * 1024 * 1024) {
+    throw new Error("File is too large.");
+  }
+
+  return file.text();
 }
 
 function parseGenerateRequest(body: unknown) {
@@ -111,24 +148,29 @@ ${payload.sourceText}
 function parsePersonaDraft(content: string, name: string, sourceText: string) {
   const parsed = JSON.parse(extractJson(content)) as Partial<PersonaData>;
   const personaId = slugify(parsed.persona_id ?? name);
-
-  return {
+  const draft = sanitizePersonaData({
     persona_id: personaId,
     name,
     avatar_url: undefined,
     tagline: parsed.tagline ?? "Custom persona",
     bio: parsed.bio ?? parsed.identity ?? `Custom persona based on pasted text.`,
     identity: parsed.identity ?? `${name} communicates in the style captured by the provided source text.`,
-    catchphrases: ensureStringArray(parsed.catchphrases),
-    tone_traits: ensureStringArray(parsed.tone_traits),
+    catchphrases: cleanStringArray(parsed.catchphrases),
+    tone_traits: cleanStringArray(parsed.tone_traits),
     teaching_pattern:
       parsed.teaching_pattern ??
       "understand the question -> answer in the captured style -> give a practical next step",
-    topics: ensureStringArray(parsed.topics),
-    starter_prompts: ensureStringArray(parsed.starter_prompts).slice(0, 3),
+    topics: cleanStringArray(parsed.topics),
+    starter_prompts: cleanStringArray(parsed.starter_prompts).slice(0, 3),
     few_shot: Array.isArray(parsed.few_shot) ? parsed.few_shot.slice(0, 6) : [],
     source_count: Math.max(1, Math.ceil(sourceText.length / 30000)),
-  } satisfies PersonaData;
+  } satisfies PersonaData);
+
+  if (!draft) {
+    throw new Error("Could not parse generated persona JSON.");
+  }
+
+  return draft;
 }
 
 function extractJson(content: string) {
@@ -142,26 +184,10 @@ function extractJson(content: string) {
   return content.slice(firstBrace, lastBrace + 1);
 }
 
-function ensureStringArray(value: unknown) {
-  return Array.isArray(value)
-    ? value.filter((item): item is string => typeof item === "string")
-    : [];
-}
-
 function isSourceType(value: string): value is SourceType {
   return (
     value === "youtube-transcript" ||
     value === "whatsapp-chat" ||
     value === "other"
-  );
-}
-
-function slugify(value: string) {
-  return (
-    value
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/(^-|-$)/g, "")
-      .slice(0, 48) || crypto.randomUUID()
   );
 }

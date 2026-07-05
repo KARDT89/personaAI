@@ -1,4 +1,4 @@
-import { and, asc, eq, or } from "drizzle-orm";
+import { and, asc, desc, eq, or } from "drizzle-orm";
 
 import { requireUser } from "@/lib/auth-utils";
 import { sessions } from "@/lib/db/schema";
@@ -16,7 +16,7 @@ export async function GET(req: Request) {
     .select()
     .from(personas)
     .where(or(eq(personas.isBuiltIn, true), eq(personas.ownerUserId, user.id)))
-    .orderBy(asc(personas.isBuiltIn), asc(personas.name));
+    .orderBy(desc(personas.isBuiltIn), asc(personas.name));
 
   return Response.json({
     personas: rows.map(toPersonaSummary),
@@ -84,5 +84,7 @@ function toPersonaSummary(persona: typeof personas.$inferSelect) {
     topics: persona.topicsJson ?? [],
     starterPrompts: persona.starterPromptsJson ?? [],
     isBuiltIn: persona.isBuiltIn,
+    sourceCount: persona.sourceCount,
+    personaData: persona.personaJson ?? undefined,
   };
 }

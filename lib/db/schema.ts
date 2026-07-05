@@ -9,12 +9,15 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 
+import type { PersonaData } from "@/lib/personas/promptBuilder";
+
 import { user } from "./auth-schema";
 
 export const personas = pgTable("personas", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   systemPrompt: text("system_prompt").notNull(),
+  personaJson: jsonb("persona_json").$type<PersonaData>(),
   ownerUserId: text("owner_user_id").references(() => user.id, {
     onDelete: "cascade",
   }),

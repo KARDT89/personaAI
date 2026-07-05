@@ -85,12 +85,12 @@ export function AuthGate({ children }: AuthGateProps) {
               name,
               email,
               password,
-              callbackURL: "/",
+              callbackURL: "/app",
             })
           : await authClient.signIn.email({
               email,
               password,
-              callbackURL: "/",
+              callbackURL: "/app",
             });
 
       const authError = getAuthResponseError(result);
@@ -111,7 +111,7 @@ export function AuthGate({ children }: AuthGateProps) {
     setError(null);
     await authClient.signIn.social({
       provider: "github",
-      callbackURL: "/",
+      callbackURL: "/app",
     });
   }
 

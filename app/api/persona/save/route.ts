@@ -1,6 +1,7 @@
 import { requireUser } from "@/lib/auth-utils";
 import { personas } from "@/lib/db/schema";
 import { buildSystemPrompt, type PersonaData } from "@/lib/personas";
+import { sanitizePersonaData } from "@/lib/personas/validation";
 
 export async function POST(req: Request) {
   const user = await requireUser(req);
@@ -31,6 +32,7 @@ export async function POST(req: Request) {
       id,
       name: persona.name,
       systemPrompt: buildSystemPrompt(persona),
+      personaJson: persona,
       ownerUserId: user.id,
       isBuiltIn: false,
       avatarUrl: persona.avatar_url ?? null,
@@ -52,6 +54,8 @@ export async function POST(req: Request) {
       topics: savedPersona.topicsJson ?? [],
       starterPrompts: savedPersona.starterPromptsJson ?? [],
       isBuiltIn: savedPersona.isBuiltIn,
+      sourceCount: savedPersona.sourceCount,
+      personaData: savedPersona.personaJson ?? undefined,
     },
   });
 }
@@ -61,33 +65,5 @@ function parsePersona(body: unknown): PersonaData | null {
     return null;
   }
 
-  const persona = (body as { persona: unknown }).persona as Partial<PersonaData>;
-
-  if (
-    typeof persona.name !== "string" ||
-    typeof persona.identity !== "string" ||
-    !Array.isArray(persona.tone_traits) ||
-    !Array.isArray(persona.catchphrases) ||
-    !Array.isArray(persona.few_shot)
-  ) {
-    return null;
-  }
-
-  return {
-    persona_id: persona.persona_id ?? "custom",
-    name: persona.name,
-    avatar_url: persona.avatar_url,
-    tagline: persona.tagline,
-    bio: persona.bio,
-    identity: persona.identity,
-    catchphrases: persona.catchphrases,
-    tone_traits: persona.tone_traits,
-    teaching_pattern:
-      persona.teaching_pattern ??
-      "understand the question -> answer in style -> give a practical next step",
-    topics: persona.topics ?? [],
-    starter_prompts: persona.starter_prompts ?? [],
-    few_shot: persona.few_shot,
-    source_count: persona.source_count ?? 1,
-  };
+  return sanitizePersonaData((body as { persona: unknown }).persona);
 }

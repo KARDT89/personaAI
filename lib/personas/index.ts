@@ -18,6 +18,8 @@ export type PersonaSummary = {
   topics: string[];
   starterPrompts: string[];
   isBuiltIn: boolean;
+  sourceCount: number;
+  personaData?: PersonaData;
 };
 
 export function isPersonaId(value: unknown): value is PersonaId {
@@ -38,6 +40,8 @@ export function getAvailablePersonas(): PersonaSummary[] {
     topics: persona.topics ?? [],
     starterPrompts: persona.starter_prompts ?? [],
     isBuiltIn: true,
+    sourceCount: persona.source_count ?? 0,
+    personaData: persona,
   }));
 }
 
@@ -48,6 +52,7 @@ export function buildPersonaRecord(personaId: PersonaId) {
     id: persona.persona_id,
     name: persona.name,
     systemPrompt: buildSystemPrompt(persona),
+    personaJson: persona,
     ownerUserId: null,
     isBuiltIn: true,
     avatarUrl: persona.avatar_url ?? null,
