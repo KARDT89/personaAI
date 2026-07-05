@@ -6,16 +6,21 @@ import {
   BookOpenIcon,
   BotIcon,
   ChevronDownIcon,
+  CheckCircle2Icon,
+  ClipboardPasteIcon,
+  DatabaseIcon,
   FileTextIcon,
   HeadphonesIcon,
   KeyRoundIcon,
   LibraryIcon,
+  LayersIcon,
   LogOutIcon,
   MenuIcon,
   MessageSquareIcon,
   PanelRightIcon,
   PencilIcon,
   PlusIcon,
+  SearchCheckIcon,
   SendIcon,
   SettingsIcon,
   ShieldIcon,
@@ -256,6 +261,7 @@ export function ChatWindow() {
   const [dialogMode, setDialogMode] = useState<PersonaDialogMode>("create");
   const [isPersonaDialogOpen, setIsPersonaDialogOpen] = useState(false);
   const [isLearningSourceDialogOpen, setIsLearningSourceDialogOpen] = useState(false);
+  const [learningSourceDialogKind, setLearningSourceDialogKind] = useState<LearningSourceKind>("book_pdf");
   const [personaBeingEdited, setPersonaBeingEdited] = useState<PersonaOption | null>(null);
   const [personaBeingDeleted, setPersonaBeingDeleted] = useState<PersonaOption | null>(null);
   const [sessionBeingDeleted, setSessionBeingDeleted] = useState<SessionSummary | null>(null);
@@ -825,6 +831,11 @@ export function ChatWindow() {
     setIsPersonaDialogOpen(true);
   }
 
+  function openLearningSourceDialog(kind: LearningSourceKind = "book_pdf") {
+    setLearningSourceDialogKind(kind);
+    setIsLearningSourceDialogOpen(true);
+  }
+
   function openEditPersona(persona: PersonaOption) {
     setDialogMode("edit");
     setPersonaBeingEdited(persona);
@@ -1030,7 +1041,7 @@ export function ChatWindow() {
             isLoading={isLoadingLearningSources || isLoadingLearningSessions}
             sessions={learningSessions}
             sources={learningSources}
-            onCreate={() => setIsLearningSourceDialogOpen(true)}
+            onCreate={() => openLearningSourceDialog("book_pdf")}
             onDeleteSession={setLearningSessionBeingDeleted}
             onDeleteSource={setLearningSourceBeingDeleted}
             onModeChange={setActiveMode}
@@ -1051,7 +1062,7 @@ export function ChatWindow() {
               </SheetTrigger>
               <SheetContent side="left" className="w-[20rem] p-0">
                 <SheetHeader className="border-b">
-                  <SheetTitle>{activeMode === "learning" ? "Self Development" : "Personas"}</SheetTitle>
+                  <SheetTitle>{activeMode === "learning" ? "Study Library" : "Personas"}</SheetTitle>
                 </SheetHeader>
                 {activeMode === "personas" ? (
                   <PersonaLibrary
@@ -1095,7 +1106,7 @@ export function ChatWindow() {
                     sources={learningSources}
                     onCreate={() => {
                       setIsMobileLibraryOpen(false);
-                      setIsLearningSourceDialogOpen(true);
+                      openLearningSourceDialog("book_pdf");
                     }}
                     onDeleteSession={(session) => {
                       setIsMobileLibraryOpen(false);
@@ -1136,7 +1147,7 @@ export function ChatWindow() {
             <div className="min-w-0">
               <h1 className="truncate text-sm font-semibold">
                 {activeMode === "learning"
-                  ? currentLearningSource?.title ?? "Self Development"
+                  ? currentLearningSource?.title ?? "Study Library"
                   : currentPersona.name}
               </h1>
               <p className="truncate text-xs text-muted-foreground">
@@ -1247,7 +1258,7 @@ export function ChatWindow() {
                       <EmptyLearningChat
                         isStartingSession={isStartingSession}
                         source={currentLearningSource}
-                        onCreate={() => setIsLearningSourceDialogOpen(true)}
+                        onCreate={openLearningSourceDialog}
                         onPromptClick={setInput}
                       />
                     ) : (
@@ -1356,10 +1367,11 @@ export function ChatWindow() {
         {activeMode === "learning" ? (
           <LearningDetails
             compactMode={isCompactMode}
+            sessions={learningSessions}
             showProfileRail={showProfileRail}
             source={currentLearningSource}
             onCompactModeChange={setIsCompactMode}
-            onCreate={() => setIsLearningSourceDialogOpen(true)}
+            onCreate={() => openLearningSourceDialog("book_pdf")}
             onDelete={setLearningSourceBeingDeleted}
             onPromptClick={setInput}
             onShowProfileRailChange={setShowProfileRail}
@@ -1410,7 +1422,9 @@ export function ChatWindow() {
       />
 
       <LearningSourceDialog
+        key={`${learningSourceDialogKind}-${isLearningSourceDialogOpen}`}
         apiKey={apiKeyMode === "personal" ? personalApiKey.trim() || undefined : undefined}
+        initialKind={learningSourceDialogKind}
         open={isLearningSourceDialogOpen}
         onOpenChange={setIsLearningSourceDialogOpen}
         onSaved={(source) => void handleLearningSourceSaved(source)}
@@ -1791,7 +1805,7 @@ function LearningLibrary({
       <div className="flex h-16 items-center justify-between border-b px-4">
         <div className="flex min-w-0 items-center gap-2 font-semibold">
           <BookOpenIcon className="size-4 shrink-0" />
-          <span className="truncate">Self Development</span>
+          <span className="truncate">Study Library</span>
         </div>
         <Button type="button" size="icon-sm" onClick={onCreate} aria-label="Add source">
           <PlusIcon />
@@ -1853,7 +1867,7 @@ function LearningLibrary({
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-sm font-medium">{source.title}</span>
                         <span className="block truncate text-xs text-muted-foreground">
-                          {sourceKindLabel(source.sourceKind)} / {source.chunkCount} chunks
+                          {sourceKindLabel(source.sourceKind)} / {source.chunkCount} indexed chunks
                         </span>
                       </span>
                     </button>
@@ -1906,7 +1920,7 @@ function LearningLibrary({
             })
           ) : (
             <div className="rounded-lg border border-dashed bg-background/70 p-4 text-sm text-muted-foreground">
-              Add a book PDF or podcast transcript to start building your learning library.
+              Upload a PDF or paste a transcript to build your study library.
             </div>
           )}
         </div>
@@ -1997,7 +2011,7 @@ function AppModeSwitch({
         onClick={() => onModeChange("learning")}
       >
         <BookOpenIcon />
-        Self Dev
+        Study
       </Button>
     </div>
   );
@@ -2653,7 +2667,7 @@ function EmptyLearningChat({
 }: {
   isStartingSession: boolean;
   source: LearningSource | null;
-  onCreate: () => void;
+  onCreate: (kind?: LearningSourceKind) => void;
   onPromptClick: (prompt: string) => void;
 }) {
   if (isStartingSession) {
@@ -2665,20 +2679,52 @@ function EmptyLearningChat({
   }
 
   if (!source) {
+    const examples = [
+      ["Summaries", "Compress dense chapters into memorable ideas."],
+      ["Practice", "Turn advice into weekly action plans."],
+      ["Recall", "Ask grounded questions with source hints."],
+    ];
+
     return (
       <div className="flex min-h-72 flex-1 items-center justify-center">
-        <div className="w-full max-w-xl text-center">
-          <div className="mx-auto mb-4 flex size-16 items-center justify-center rounded-full bg-muted">
-            <BookOpenIcon className="size-7 text-muted-foreground" />
+        <div className="w-full max-w-2xl overflow-hidden rounded-lg border bg-background shadow-sm">
+          <div className="border-b bg-muted/35 p-5 sm:p-6">
+            <div className="flex items-start gap-4">
+              <div className="flex size-12 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+                <LibraryIcon className="size-5" />
+              </div>
+              <div className="min-w-0">
+                <Badge variant="secondary" className="mb-3 w-fit">
+                  Source Studio
+                </Badge>
+                <h2 className="text-2xl font-semibold text-pretty">
+                  Build a study workspace from one source.
+                </h2>
+                <p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground">
+                  Upload a text-based PDF or paste a transcript. PersonaAI extracts the text,
+                  creates searchable chunks, and prepares citation-grounded study chat.
+                </p>
+              </div>
+            </div>
+            <div className="mt-5 flex flex-col gap-2 sm:flex-row">
+              <Button type="button" onClick={() => onCreate("book_pdf")}>
+                <UploadIcon />
+                Upload PDF
+              </Button>
+              <Button type="button" variant="outline" onClick={() => onCreate("podcast_transcript")}>
+                <ClipboardPasteIcon />
+                Paste transcript
+              </Button>
+            </div>
           </div>
-          <h2 className="text-xl font-semibold text-pretty">Build your self-development library</h2>
-          <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-muted-foreground">
-            Add a book PDF or podcast transcript, then ask for lessons, principles, and practical next steps.
-          </p>
-          <Button type="button" className="mt-5" onClick={onCreate}>
-            <PlusIcon />
-            Add source
-          </Button>
+          <div className="grid gap-3 p-4 sm:grid-cols-3">
+            {examples.map(([title, description]) => (
+              <div key={title} className="rounded-lg border bg-muted/20 p-3 text-left">
+                <div className="text-sm font-medium">{title}</div>
+                <div className="mt-1 text-xs leading-5 text-muted-foreground">{description}</div>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
     );
@@ -2693,13 +2739,16 @@ function EmptyLearningChat({
   return (
     <div className="flex min-h-72 flex-1 items-center justify-center">
       <div className="w-full max-w-xl text-center">
-        <div className="mx-auto mb-4 flex size-16 items-center justify-center rounded-full bg-muted">
+        <div className="mx-auto mb-4 flex size-16 items-center justify-center rounded-lg bg-muted">
           {source.sourceKind === "podcast_transcript" ? (
             <HeadphonesIcon className="size-7 text-muted-foreground" />
           ) : (
             <BookOpenIcon className="size-7 text-muted-foreground" />
           )}
         </div>
+        <Badge variant="outline" className="mb-3">
+          {source.chunkCount} indexed chunks
+        </Badge>
         <h2 className="text-xl font-semibold text-pretty">Ask about {source.title}</h2>
         <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-muted-foreground">
           Pull out lessons, frameworks, examples, and reflection questions grounded in this source.
@@ -2724,9 +2773,18 @@ function EmptyLearningChat({
 
 function CitationRow({ citations }: { citations: LearningCitation[] }) {
   return (
-    <div className="mt-2 flex flex-wrap gap-1.5">
+    <div className="mt-2 flex flex-wrap items-center gap-1.5 rounded-lg border bg-emerald-500/5 px-2.5 py-2 text-xs text-muted-foreground">
+      <span className="flex items-center gap-1 font-medium text-emerald-700 dark:text-emerald-300">
+        <SearchCheckIcon className="size-3.5" />
+        Grounded in
+      </span>
       {citations.slice(0, 4).map((citation) => (
-        <Badge key={`${citation.sourceId}-${citation.chunkIndex}`} variant="outline">
+        <Badge
+          key={`${citation.sourceId}-${citation.chunkIndex}`}
+          variant="outline"
+          className="bg-background/80"
+          title="Chunk preview is coming next."
+        >
           {citation.label}
         </Badge>
       ))}
@@ -2736,6 +2794,7 @@ function CitationRow({ citations }: { citations: LearningCitation[] }) {
 
 function LearningDetails({
   compactMode,
+  sessions,
   showProfileRail,
   source,
   onCompactModeChange,
@@ -2745,6 +2804,7 @@ function LearningDetails({
   onShowProfileRailChange,
 }: {
   compactMode: boolean;
+  sessions: LearningSessionSummary[];
   showProfileRail: boolean;
   source: LearningSource | null;
   onCompactModeChange: (enabled: boolean) => void;
@@ -2753,6 +2813,9 @@ function LearningDetails({
   onPromptClick: (prompt: string) => void;
   onShowProfileRailChange: (enabled: boolean) => void;
 }) {
+  const sourceSessions = source
+    ? sessions.filter((session) => session.sourceId === source.id).slice(0, 4)
+    : [];
   const prompts = [
     "Summarize this into a weekly practice plan.",
     "What assumptions does this source challenge?",
@@ -2764,7 +2827,7 @@ function LearningDetails({
     <div className="flex h-full min-h-0 flex-col bg-background/80">
       <div className="flex h-16 shrink-0 items-center justify-between border-b px-4">
         <div className="min-w-0">
-          <div className="truncate text-sm font-semibold">Self Development</div>
+          <div className="truncate text-sm font-semibold">Source Inspector</div>
           <div className="truncate text-xs text-muted-foreground">
             {source?.title ?? "No source selected"}
           </div>
@@ -2788,42 +2851,77 @@ function LearningDetails({
           <TabsContent value="source" className="animate-panel-in mt-0 space-y-5 p-4">
             {source ? (
               <>
-                <div className="flex items-center gap-3">
-                  <div className="flex size-12 shrink-0 items-center justify-center rounded-full bg-muted">
-                    {source.sourceKind === "podcast_transcript" ? (
-                      <HeadphonesIcon className="size-5 text-muted-foreground" />
-                    ) : (
-                      <BookOpenIcon className="size-5 text-muted-foreground" />
-                    )}
+                <div className="rounded-lg border bg-muted/25 p-3">
+                  <div className="flex items-start gap-3">
+                    <div className="flex size-12 shrink-0 items-center justify-center rounded-lg bg-background">
+                      {source.sourceKind === "podcast_transcript" ? (
+                        <HeadphonesIcon className="size-5 text-muted-foreground" />
+                      ) : (
+                        <BookOpenIcon className="size-5 text-muted-foreground" />
+                      )}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <h2 className="truncate font-semibold">{source.title}</h2>
+                      <p className="text-sm text-muted-foreground">
+                        {sourceKindLabel(source.sourceKind)}
+                      </p>
+                    </div>
+                    <Badge variant="secondary" className="shrink-0">
+                      Ready
+                    </Badge>
                   </div>
-                  <div className="min-w-0">
-                    <h2 className="truncate font-semibold">{source.title}</h2>
-                    <p className="text-sm text-muted-foreground">
-                      {sourceKindLabel(source.sourceKind)}
-                    </p>
+                  <div className="mt-3 grid gap-2 text-sm">
+                    <SummaryMetric label="Chunks" value={String(source.chunkCount)} />
+                    <SummaryMetric label="Characters" value={source.sourceChars.toLocaleString()} />
+                    {source.pageCount ? (
+                      <SummaryMetric label="Pages" value={String(source.pageCount)} />
+                    ) : null}
                   </div>
                 </div>
-                <div className="grid gap-2 text-sm">
-                  <SummaryMetric label="Chunks" value={String(source.chunkCount)} />
-                  <SummaryMetric label="Characters" value={source.sourceChars.toLocaleString()} />
-                  {source.pageCount ? (
-                    <SummaryMetric label="Pages" value={String(source.pageCount)} />
-                  ) : null}
+
+                <div className="grid gap-2">
+                  <InspectorStep icon={FileTextIcon} label="Text extracted" value="Source is searchable" />
+                  <InspectorStep icon={LayersIcon} label="Study chunks" value={`${source.chunkCount} retrieval units`} />
+                  <InspectorStep icon={DatabaseIcon} label="Embeddings" value="Semantic lookup prepared" />
+                  <InspectorStep icon={SearchCheckIcon} label="Citations" value="Answers include source hints" />
                 </div>
+
                 <Alert>
                   <SparklesIcon />
                   <AlertTitle>Grounded study mode</AlertTitle>
                   <AlertDescription>
-                    Answers retrieve from this selected source and include compact source hints.
+                    Each answer retrieves relevant chunks from this source before responding.
                   </AlertDescription>
                 </Alert>
+
+                <div className="space-y-2">
+                  <div className="text-xs font-medium uppercase text-muted-foreground">Recent chats</div>
+                  {sourceSessions.length > 0 ? (
+                    <div className="grid gap-2">
+                      {sourceSessions.map((session) => (
+                        <div key={session.id} className="rounded-lg border bg-background p-2 text-sm">
+                          <div className="truncate font-medium">
+                            {session.title === "New chat" ? "Untitled chat" : session.title}
+                          </div>
+                          <div className="mt-1 truncate text-xs text-muted-foreground">
+                            {session.preview ?? formatSessionDate(session.updatedAt ?? session.createdAt)}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="rounded-lg border border-dashed p-3 text-sm text-muted-foreground">
+                      No saved chats for this source yet.
+                    </div>
+                  )}
+                </div>
               </>
             ) : (
               <Alert>
                 <BookOpenIcon />
                 <AlertTitle>No source selected</AlertTitle>
                 <AlertDescription>
-                  Add a book PDF or podcast transcript to start.
+                  Upload a PDF or paste a transcript to start.
                 </AlertDescription>
               </Alert>
             )}
@@ -2873,27 +2971,57 @@ function LearningDetails({
   );
 }
 
+type ImportStageId = "reading" | "extracting" | "chunking" | "embedding" | "indexing" | "ready";
+
+const IMPORT_STAGES: Array<{
+  description: string;
+  icon: typeof FileTextIcon;
+  id: ImportStageId;
+  label: string;
+}> = [
+  { description: "Preparing the file or transcript.", icon: FileTextIcon, id: "reading", label: "Reading source" },
+  { description: "Pulling clean text out of the source.", icon: SearchCheckIcon, id: "extracting", label: "Extracting text" },
+  { description: "Splitting content into study-sized retrieval units.", icon: LayersIcon, id: "chunking", label: "Splitting into study chunks" },
+  { description: "Creating vectors for semantic lookup.", icon: DatabaseIcon, id: "embedding", label: "Creating embeddings" },
+  { description: "Preparing compact source hints for answers.", icon: SearchCheckIcon, id: "indexing", label: "Building citation map" },
+  { description: "The source is indexed and ready for study chat.", icon: CheckCircle2Icon, id: "ready", label: "Ready to study" },
+];
+
 function LearningSourceDialog({
   apiKey,
+  initialKind,
   open,
   onOpenChange,
   onSaved,
 }: {
   apiKey?: string;
+  initialKind: LearningSourceKind;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSaved: (source: LearningSource) => void;
 }) {
-  const [kind, setKind] = useState<LearningSourceKind>("book_pdf");
+  const [kind, setKind] = useState<LearningSourceKind>(initialKind);
   const [title, setTitle] = useState("");
   const [show, setShow] = useState("");
   const [episode, setEpisode] = useState("");
   const [transcript, setTranscript] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [activeStage, setActiveStage] = useState<ImportStageId>("reading");
+  const [savedSource, setSavedSource] = useState<LearningSource | null>(null);
 
   async function handleSave() {
     setIsSaving(true);
+    setSavedSource(null);
+    setActiveStage("reading");
+
+    const timer = window.setInterval(() => {
+      setActiveStage((current) => {
+        const currentIndex = IMPORT_STAGES.findIndex((stage) => stage.id === current);
+        const nextStage = IMPORT_STAGES[Math.min(currentIndex + 1, IMPORT_STAGES.length - 2)];
+        return nextStage?.id ?? current;
+      });
+    }, 900);
 
     try {
       const response =
@@ -2906,12 +3034,13 @@ function LearningSourceDialog({
         throw new Error(data.error ?? "Could not add source.");
       }
 
+      setActiveStage("ready");
+      setSavedSource(data.source);
       toast.success("Learning source added.");
-      resetForm();
-      onSaved(data.source);
     } catch (caughtError) {
       toast.error(getErrorMessage(caughtError));
     } finally {
+      window.clearInterval(timer);
       setIsSaving(false);
     }
   }
@@ -2959,114 +3088,311 @@ function LearningSourceDialog({
     setEpisode("");
     setTranscript("");
     setFile(null);
+    setSavedSource(null);
+    setActiveStage("reading");
   }
 
+  function handleOpenChange(nextOpen: boolean) {
+    if (!nextOpen && !isSaving) {
+      resetForm();
+    }
+
+    onOpenChange(nextOpen);
+  }
+
+  function handleFileSelect(nextFile: File | null) {
+    setFile(nextFile);
+
+    if (nextFile && !title.trim()) {
+      setTitle(filenameToReadableTitle(nextFile.name));
+    }
+  }
+
+  function handleStartStudying() {
+    if (!savedSource) {
+      return;
+    }
+
+    const source = savedSource;
+    resetForm();
+    onSaved(source);
+  }
+
+  const fileStatus = getPdfFileStatus(file);
+  const inferredTitle = file ? filenameToReadableTitle(file.name) : "";
+  const transcriptChars = transcript.trim().length;
+  const readyPrompts = [
+    "Summarize core ideas",
+    "Create a practice plan",
+    "Extract mental models",
+    "Quiz me from this source",
+  ];
   const canSave =
     kind === "book_pdf"
-      ? Boolean(file)
-      : transcript.trim().length >= 200 && Boolean(title.trim() || episode.trim());
+      ? Boolean(file) && fileStatus.valid
+      : transcriptChars >= 200 && Boolean(title.trim() || episode.trim());
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex max-h-[92dvh] flex-col overflow-hidden p-0 sm:max-w-2xl">
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogContent className="flex max-h-[92dvh] flex-col overflow-hidden p-0 sm:max-w-4xl">
         <DialogHeader className="border-b p-6 pb-4">
-          <DialogTitle>Add learning source</DialogTitle>
+          <DialogTitle>Source Import Studio</DialogTitle>
           <DialogDescription>
-            Add a book PDF or podcast transcript for grounded self-development chat.
+            Build a study-ready source with extraction, chunking, embeddings, and citation hints.
           </DialogDescription>
         </DialogHeader>
 
         <div className="min-h-0 flex-1 overflow-y-auto p-6">
-          <Tabs value={kind} onValueChange={(value) => setKind(value as LearningSourceKind)}>
-            <TabsList className="grid w-full grid-cols-2">
-              <TabsTrigger value="book_pdf">Book PDF</TabsTrigger>
-              <TabsTrigger value="podcast_transcript">Podcast Transcript</TabsTrigger>
-            </TabsList>
+          {savedSource ? (
+            <SourceReadyPanel source={savedSource} prompts={readyPrompts} />
+          ) : (
+            <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
+              <Tabs value={kind} onValueChange={(value) => setKind(value as LearningSourceKind)}>
+                <TabsList className="grid w-full grid-cols-2">
+                  <TabsTrigger value="book_pdf">Book PDF</TabsTrigger>
+                  <TabsTrigger value="podcast_transcript">Podcast Transcript</TabsTrigger>
+                </TabsList>
 
-            <TabsContent value="book_pdf" className="mt-5 grid gap-4">
-              <div className="grid gap-1.5">
-                <Label htmlFor="learning-book-title">Title</Label>
-                <Input
-                  id="learning-book-title"
-                  value={title}
-                  onChange={(event) => setTitle(event.target.value)}
-                  placeholder="Optional; defaults to filename"
-                />
-              </div>
-              <div className="grid gap-1.5">
-                <Label htmlFor="learning-book-file">PDF file</Label>
-                <Input
-                  id="learning-book-file"
-                  type="file"
-                  accept=".pdf,application/pdf"
-                  onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                    setFile(event.target.files?.[0] ?? null)
-                  }
-                />
-                <p className="text-xs text-muted-foreground">
-                  Text-based PDFs up to 25 MB are supported. Scanned image PDFs need OCR first.
-                </p>
-              </div>
-            </TabsContent>
+                <TabsContent value="book_pdf" className="mt-5 grid gap-4">
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="learning-book-title">Title</Label>
+                    <Input
+                      id="learning-book-title"
+                      value={title}
+                      onChange={(event) => setTitle(event.target.value)}
+                      placeholder={inferredTitle || "Optional; defaults to filename"}
+                    />
+                  </div>
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="learning-book-file">PDF file</Label>
+                    <label
+                      htmlFor="learning-book-file"
+                      className={cn(
+                        "group grid cursor-pointer gap-3 rounded-lg border border-dashed bg-muted/20 p-6 text-center transition hover:border-primary/60 hover:bg-muted/35",
+                        file && fileStatus.valid && "border-emerald-500/60 bg-emerald-500/5",
+                        file && !fileStatus.valid && "border-destructive/70 bg-destructive/5",
+                      )}
+                      onDragOver={(event) => event.preventDefault()}
+                      onDrop={(event) => {
+                        event.preventDefault();
+                        handleFileSelect(event.dataTransfer.files?.[0] ?? null);
+                      }}
+                    >
+                      <div className="mx-auto flex size-14 items-center justify-center rounded-lg bg-background shadow-sm">
+                        <UploadIcon className="size-6 text-muted-foreground transition group-hover:text-primary" />
+                      </div>
+                      <div>
+                        <div className="text-sm font-medium">
+                          {file ? file.name : "Drop a text-based PDF here"}
+                        </div>
+                        <div className="mt-1 text-xs text-muted-foreground">
+                          {file
+                            ? `${formatBytes(file.size)} / ${fileStatus.message}`
+                            : "PDF only, up to 25 MB. Scanned image PDFs need OCR first."}
+                        </div>
+                      </div>
+                    </label>
+                    <Input
+                      id="learning-book-file"
+                      type="file"
+                      accept=".pdf,application/pdf"
+                      className="sr-only"
+                      onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                        handleFileSelect(event.target.files?.[0] ?? null)
+                      }
+                    />
+                  </div>
+                </TabsContent>
 
-            <TabsContent value="podcast_transcript" className="mt-5 grid gap-4">
-              <div className="grid gap-1.5">
-                <Label htmlFor="learning-podcast-title">Title</Label>
-                <Input
-                  id="learning-podcast-title"
-                  value={title}
-                  onChange={(event) => setTitle(event.target.value)}
-                  placeholder="Episode title"
-                />
-              </div>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="grid gap-1.5">
-                  <Label htmlFor="learning-podcast-show">Show</Label>
-                  <Input
-                    id="learning-podcast-show"
-                    value={show}
-                    onChange={(event) => setShow(event.target.value)}
-                    placeholder="Optional"
-                  />
-                </div>
-                <div className="grid gap-1.5">
-                  <Label htmlFor="learning-podcast-episode">Episode</Label>
-                  <Input
-                    id="learning-podcast-episode"
-                    value={episode}
-                    onChange={(event) => setEpisode(event.target.value)}
-                    placeholder="Optional"
-                  />
-                </div>
-              </div>
-              <div className="grid gap-1.5">
-                <Label htmlFor="learning-transcript">Transcript</Label>
-                <Textarea
-                  id="learning-transcript"
-                  value={transcript}
-                  onChange={(event) => setTranscript(event.target.value)}
-                  placeholder="Paste the podcast transcript..."
-                  className="min-h-56"
-                />
-                <p className="text-xs text-muted-foreground">
-                  Paste at least 200 characters and keep v1 transcripts under 500k characters.
-                </p>
-              </div>
-            </TabsContent>
-          </Tabs>
+                <TabsContent value="podcast_transcript" className="mt-5 grid gap-4">
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="learning-podcast-title">Title</Label>
+                    <Input
+                      id="learning-podcast-title"
+                      value={title}
+                      onChange={(event) => setTitle(event.target.value)}
+                      placeholder="Episode title"
+                    />
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="grid gap-1.5">
+                      <Label htmlFor="learning-podcast-show">Show</Label>
+                      <Input
+                        id="learning-podcast-show"
+                        value={show}
+                        onChange={(event) => setShow(event.target.value)}
+                        placeholder="Optional"
+                      />
+                    </div>
+                    <div className="grid gap-1.5">
+                      <Label htmlFor="learning-podcast-episode">Episode</Label>
+                      <Input
+                        id="learning-podcast-episode"
+                        value={episode}
+                        onChange={(event) => setEpisode(event.target.value)}
+                        placeholder="Optional"
+                      />
+                    </div>
+                  </div>
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="learning-transcript">Transcript</Label>
+                    <Textarea
+                      id="learning-transcript"
+                      value={transcript}
+                      onChange={(event) => setTranscript(event.target.value)}
+                      placeholder="Paste the podcast transcript..."
+                      className="min-h-56"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      {transcriptChars.toLocaleString()} characters / minimum 200 / maximum 500k.
+                    </p>
+                  </div>
+                </TabsContent>
+              </Tabs>
+
+              <ImportTimeline activeStage={activeStage} isSaving={isSaving} />
+            </div>
+          )}
         </div>
 
         <DialogFooter className="border-t bg-popover p-4">
-          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button type="button" disabled={!canSave || isSaving} onClick={() => void handleSave()}>
-            {isSaving ? <Spinner /> : kind === "book_pdf" ? <BookOpenIcon /> : <HeadphonesIcon />}
-            Add source
-          </Button>
+          {savedSource ? (
+            <Button type="button" onClick={handleStartStudying}>
+              <SparklesIcon />
+              Start studying
+            </Button>
+          ) : (
+            <>
+              <Button type="button" variant="outline" disabled={isSaving} onClick={() => handleOpenChange(false)}>
+                Cancel
+              </Button>
+              <Button type="button" disabled={!canSave || isSaving} onClick={() => void handleSave()}>
+                {isSaving ? <Spinner /> : kind === "book_pdf" ? <BookOpenIcon /> : <HeadphonesIcon />}
+                {isSaving ? "Importing source" : "Build study source"}
+              </Button>
+            </>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function ImportTimeline({
+  activeStage,
+  isSaving,
+}: {
+  activeStage: ImportStageId;
+  isSaving: boolean;
+}) {
+  const activeIndex = IMPORT_STAGES.findIndex((stage) => stage.id === activeStage);
+
+  return (
+    <div className="rounded-lg border bg-background p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-sm font-semibold">Import pipeline</div>
+          <p className="mt-1 text-xs leading-5 text-muted-foreground">
+            See how a raw source becomes citation-grounded study chat.
+          </p>
+        </div>
+        <Badge variant={isSaving ? "secondary" : "outline"}>
+          {isSaving ? "Running" : "Preview"}
+        </Badge>
+      </div>
+      <div className="mt-4 grid gap-2">
+        {IMPORT_STAGES.map((stage, index) => {
+          const Icon = stage.icon;
+          const isDone = activeStage === "ready" || index < activeIndex;
+          const isActive = index === activeIndex && activeStage !== "ready";
+
+          return (
+            <div
+              key={stage.id}
+              className={cn(
+                "flex items-start gap-3 rounded-lg border p-3 transition",
+                isActive && "border-primary/50 bg-primary/5",
+                isDone && "border-emerald-500/30 bg-emerald-500/5",
+              )}
+            >
+              <div
+                className={cn(
+                  "mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-md bg-muted",
+                  isActive && "bg-primary text-primary-foreground",
+                  isDone && "bg-emerald-500 text-white",
+                )}
+              >
+                {isDone ? (
+                  <CheckCircle2Icon className="size-4" />
+                ) : isActive && isSaving ? (
+                  <Spinner className="size-4" />
+                ) : (
+                  <Icon className="size-4" />
+                )}
+              </div>
+              <div className="min-w-0">
+                <div className="text-sm font-medium">{stage.label}</div>
+                <div className="mt-0.5 text-xs leading-5 text-muted-foreground">
+                  {stage.description}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function SourceReadyPanel({
+  prompts,
+  source,
+}: {
+  prompts: string[];
+  source: LearningSource;
+}) {
+  const stats = [
+    ["Type", sourceKindLabel(source.sourceKind)],
+    ["Chunks", String(source.chunkCount)],
+    ["Characters", source.sourceChars.toLocaleString()],
+    ...(source.pageCount ? [["Pages", String(source.pageCount)]] : []),
+  ];
+
+  return (
+    <div className="grid gap-5 lg:grid-cols-[1fr_18rem]">
+      <div className="rounded-lg border bg-emerald-500/5 p-5">
+        <div className="flex items-start gap-4">
+          <div className="flex size-12 shrink-0 items-center justify-center rounded-lg bg-emerald-500 text-white">
+            <CheckCircle2Icon className="size-6" />
+          </div>
+          <div className="min-w-0">
+            <Badge variant="secondary" className="mb-3">
+              Ready to study
+            </Badge>
+            <h3 className="text-xl font-semibold text-pretty">{source.title}</h3>
+            <p className="mt-2 text-sm leading-6 text-muted-foreground">
+              The source is indexed, searchable, and ready for grounded study chat.
+            </p>
+          </div>
+        </div>
+        <div className="mt-5 grid gap-2 sm:grid-cols-2">
+          {prompts.map((prompt) => (
+            <div key={prompt} className="rounded-lg border bg-background/80 p-3 text-sm">
+              <SparklesIcon className="mb-2 size-4 text-muted-foreground" />
+              {prompt}
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="rounded-lg border bg-background p-4">
+        <div className="text-sm font-semibold">Source stats</div>
+        <div className="mt-3 grid gap-3">
+          {stats.map(([label, value]) => (
+            <SummaryMetric key={label} label={label} value={value} />
+          ))}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -3697,6 +4023,29 @@ function GenerationSummaryPanel({
   );
 }
 
+function InspectorStep({
+  icon: Icon,
+  label,
+  value,
+}: {
+  icon: typeof FileTextIcon;
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="flex items-center gap-3 rounded-lg border bg-background p-2.5">
+      <div className="flex size-8 shrink-0 items-center justify-center rounded-md bg-muted">
+        <Icon className="size-4 text-muted-foreground" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-sm font-medium">{label}</div>
+        <div className="truncate text-xs text-muted-foreground">{value}</div>
+      </div>
+      <CheckCircle2Icon className="size-4 shrink-0 text-emerald-500" />
+    </div>
+  );
+}
+
 function SummaryMetric({ label, value }: { label: string; value: string }) {
   return (
     <div>
@@ -4024,6 +4373,45 @@ function readLearningCitations(value: string | null): LearningCitation[] {
 
 function sourceKindLabel(kind: LearningSourceKind) {
   return kind === "book_pdf" ? "Book PDF" : "Podcast transcript";
+}
+
+function filenameToReadableTitle(filename: string) {
+  return filename
+    .replace(/\.[^.]+$/, "")
+    .replace(/[-_]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 160);
+}
+
+function formatBytes(bytes: number) {
+  if (!Number.isFinite(bytes) || bytes <= 0) {
+    return "0 B";
+  }
+
+  const units = ["B", "KB", "MB", "GB"];
+  const unitIndex = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  const value = bytes / 1024 ** unitIndex;
+
+  return `${value.toFixed(value >= 10 || unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
+}
+
+function getPdfFileStatus(file: File | null) {
+  if (!file) {
+    return { message: "Waiting for PDF", valid: false };
+  }
+
+  const isPdf = file.name.toLowerCase().endsWith(".pdf") || file.type === "application/pdf";
+
+  if (!isPdf) {
+    return { message: "Choose a PDF file", valid: false };
+  }
+
+  if (file.size > 25 * 1024 * 1024) {
+    return { message: "Over the 25 MB limit", valid: false };
+  }
+
+  return { message: "Ready for import", valid: true };
 }
 
 async function authApiRequest(path: string, body: Record<string, unknown>) {
