@@ -5062,7 +5062,13 @@ async function readJsonError(response: Response) {
   }
 }
 
-async function readPersonaGenerateResponse(response: Response) {
+type PersonaGenerateResponse = {
+  meta?: GenerationMeta;
+  persona: PersonaData;
+  sourceMemory?: SourceMemoryPayload;
+};
+
+async function readPersonaGenerateResponse(response: Response): Promise<PersonaGenerateResponse> {
   if (!response.ok) {
     throw new Error((await readJsonError(response)) ?? "Could not generate persona.");
   }
@@ -5083,7 +5089,10 @@ async function readPersonaGenerateResponse(response: Response) {
     throw new Error("Could not generate persona.");
   }
 
-  return data;
+  return {
+    ...data,
+    persona: data.persona,
+  };
 }
 
 function parseMessageParts(content: string): MessagePart[] {
