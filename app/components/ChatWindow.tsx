@@ -1,6 +1,6 @@
 "use client";
 
-import { ChangeEvent, FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircleIcon,
   BookOpenIcon,
@@ -255,6 +255,7 @@ const FALLBACK_PERSONAS: PersonaOption[] = [
 ];
 const DEFAULT_CHAT_MODEL = "openai/gpt-4o";
 const CUSTOM_MODEL_VALUE = "__custom-openrouter-model__";
+const MIN_PERSONA_SOURCE_CHARS = 200;
 const STORAGE_KEYS = {
   apiKeyMode: "mindprint-api-key-mode",
   compactMode: "mindprint-compact-mode",
@@ -4002,6 +4003,8 @@ function PersonaEditorDialog({
   );
   const [sourceText, setSourceText] = useState("");
   const [sourceFile, setSourceFile] = useState<File | null>(null);
+  const [sourceFileText, setSourceFileText] = useState("");
+  const [targetSpeaker, setTargetSpeaker] = useState("");
   const [draft, setDraft] = useState<PersonaData | null>(initialDraft);
   const [reviewForm, setReviewForm] = useState<PersonaReviewForm>(
     initialDraft ? personaToReviewForm(initialDraft) : createEmptyReviewForm(),
@@ -4013,8 +4016,27 @@ function PersonaEditorDialog({
   const [generationProgress, setGenerationProgress] = useState<GenerationProgress>("idle");
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const speakerDetectionText = sourceFile ? sourceFileText : sourceText;
+  const detectedSpeakers = useMemo(
+    () => sourceType === "whatsapp-chat" ? extractWhatsappSpeakers(speakerDetectionText) : [],
+    [sourceType, speakerDetectionText],
+  );
+  const exactNameSpeakerMatch = detectedSpeakers.find(
+    (speaker) => speaker.toLowerCase() === name.trim().toLowerCase(),
+  );
+  const selectedTargetSpeaker =
+    targetSpeaker && detectedSpeakers.includes(targetSpeaker)
+      ? targetSpeaker
+      : exactNameSpeakerMatch ?? "";
 
   async function handleGenerate() {
+    const blockReason = getGenerateBlockReason();
+
+    if (blockReason) {
+      toast.error(blockReason);
+      return;
+    }
+
     const progressTimers: Array<ReturnType<typeof setTimeout>> = [];
     setIsGenerating(true);
     setGenerationMeta(null);
@@ -4033,6 +4055,10 @@ function PersonaEditorDialog({
 
       if (model) {
         body.set("model", model);
+      }
+
+      if (sourceType === "whatsapp-chat") {
+        body.set("targetSpeaker", selectedTargetSpeaker);
       }
 
       if (sourceFile) {
@@ -4056,16 +4082,7 @@ function PersonaEditorDialog({
         method: "POST",
         body,
       });
-      const data = (await response.json()) as {
-        meta?: GenerationMeta;
-        persona?: PersonaData;
-        sourceMemory?: SourceMemoryPayload;
-        error?: string;
-      };
-
-      if (!response.ok || !data.persona) {
-        throw new Error(data.error ?? "Could not generate persona.");
-      }
+      const data = await readPersonaGenerateResponse(response);
 
       setDraft(data.persona);
       setGenerationMeta(data.meta ?? data.persona.generation_meta ?? null);
@@ -4119,7 +4136,40 @@ function PersonaEditorDialog({
     }
   }
 
-  const canGenerate = name.trim().length >= 2 && (sourceFile || sourceText.trim().length >= 200);
+  async function handleSourceFileChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0] ?? null;
+    const error = getPersonaSourceFileError(file);
+
+    if (error) {
+      event.currentTarget.value = "";
+      setSourceFile(null);
+      setSourceFileText("");
+      toast.error(error);
+      return;
+    }
+
+    setSourceFile(file);
+
+    if (!file) {
+      setSourceFileText("");
+      return;
+    }
+
+    try {
+      setSourceFileText(await file.text());
+    } catch {
+      event.currentTarget.value = "";
+      setSourceFile(null);
+      setSourceFileText("");
+      toast.error("Could not read the .txt file.");
+    }
+  }
+
+  const sourceCharacterCount = (sourceFile ? sourceFileText : sourceText).trim().length;
+  const sourceRequirementText = sourceFile
+    ? `${sourceFile.name} selected, ${sourceCharacterCount} characters`
+    : `${sourceCharacterCount}/${MIN_PERSONA_SOURCE_CHARS} characters`;
+  const showWhatsappSpeakerPicker = sourceType === "whatsapp-chat";
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -4163,7 +4213,10 @@ function PersonaEditorDialog({
                 id="source-type"
                 className="w-full"
                 value={sourceType}
-                onChange={(event) => setSourceType(event.target.value as SourceType)}
+                onChange={(event) => {
+                  setSourceType(event.target.value as SourceType);
+                  setTargetSpeaker("");
+                }}
               >
                 <NativeSelectOption value="youtube-transcript">YouTube transcript</NativeSelectOption>
                 <NativeSelectOption value="whatsapp-chat">WhatsApp chat</NativeSelectOption>
@@ -4184,9 +4237,7 @@ function PersonaEditorDialog({
                 id="source-file"
                 type="file"
                 accept=".txt,text/plain"
-                onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                  setSourceFile(event.target.files?.[0] ?? null)
-                }
+                onChange={(event: ChangeEvent<HTMLInputElement>) => void handleSourceFileChange(event)}
               />
             </div>
             <div className="space-y-1.5">
@@ -4198,7 +4249,35 @@ function PersonaEditorDialog({
                 placeholder="Paste transcript or chat export..."
                 className="min-h-40"
               />
+              <p className="text-xs text-muted-foreground">
+                {sourceRequirementText}
+              </p>
             </div>
+            {showWhatsappSpeakerPicker ? (
+              <div className="space-y-1.5">
+                <Label htmlFor="target-speaker">Speaker to copy</Label>
+                <NativeSelect
+                  id="target-speaker"
+                  className="w-full"
+                  value={selectedTargetSpeaker}
+                  onChange={(event) => setTargetSpeaker(event.target.value)}
+                >
+                  <NativeSelectOption value="">
+                    {detectedSpeakers.length ? "Select a speaker" : "No speakers detected yet"}
+                  </NativeSelectOption>
+                  {detectedSpeakers.map((speaker) => (
+                    <NativeSelectOption key={speaker} value={speaker}>
+                      {speaker}
+                    </NativeSelectOption>
+                  ))}
+                </NativeSelect>
+                <p className="text-xs text-muted-foreground">
+                  {detectedSpeakers.length
+                    ? `${detectedSpeakers.length} speaker${detectedSpeakers.length === 1 ? "" : "s"} detected`
+                    : "Paste or upload a WhatsApp .txt export to detect speakers."}
+                </p>
+              </div>
+            ) : null}
             {isGenerating ? (
               <GenerationProgressPanel progress={generationProgress} mode={generationMode} />
             ) : null}
@@ -4433,7 +4512,7 @@ function PersonaEditorDialog({
           {step === "source" ? (
             <Button
               type="button"
-              disabled={!canGenerate || isGenerating}
+              disabled={isGenerating}
               onClick={() => void handleGenerate()}
             >
               {isGenerating ? <Spinner /> : <SparklesIcon />}
@@ -4453,6 +4532,78 @@ function PersonaEditorDialog({
   function setReviewField(field: keyof PersonaReviewForm, value: string) {
     setReviewForm((currentForm) => ({ ...currentForm, [field]: value }));
   }
+
+  function getGenerateBlockReason() {
+    if (name.trim().length < 2) {
+      return "Enter a persona name with at least 2 characters.";
+    }
+
+    if (!sourceFile && sourceText.trim().length < MIN_PERSONA_SOURCE_CHARS) {
+      return `Paste at least ${MIN_PERSONA_SOURCE_CHARS} characters or upload a .txt file.`;
+    }
+
+    if (sourceType === "whatsapp-chat" && !selectedTargetSpeaker) {
+      return detectedSpeakers.length
+        ? "Choose the WhatsApp speaker to copy."
+        : "No WhatsApp speakers were detected. Check that the export includes lines like date - Speaker: message.";
+    }
+
+    return null;
+  }
+}
+
+function extractWhatsappSpeakers(source: string) {
+  const counts = new Map<string, number>();
+  const linePattern = createWhatsappLinePattern();
+
+  for (const line of source.split(/\r?\n/)) {
+    const match = normalizeWhatsappLine(line).match(linePattern);
+    const speaker = match?.[2]?.trim();
+
+    if (!speaker) {
+      continue;
+    }
+
+    counts.set(speaker, (counts.get(speaker) ?? 0) + 1);
+  }
+
+  return [...counts.entries()]
+    .sort((first, second) => second[1] - first[1] || first[0].localeCompare(second[0]))
+    .map(([speaker]) => speaker);
+}
+
+function createWhatsappLinePattern() {
+  const date = String.raw`\d{1,2}[/-]\d{1,2}[/-]\d{2,4}`;
+  const time = String.raw`\d{1,2}:\d{2}(?::\d{2})?(?:[\s\u00a0\u202f]*[AP]M)?`;
+
+  return new RegExp(
+    String.raw`^\[?(${date},?[\s\u00a0\u202f]+${time})\]?[\s\u00a0\u202f]+(?:-[\s\u00a0\u202f]+)?([^:]+):[\s\u00a0\u202f]*(.*)$`,
+    "i",
+  );
+}
+
+function normalizeWhatsappLine(line: string) {
+  return line
+    .replace(/[\u200e\u200f]/g, "")
+    .replace(/[\u00a0\u202f]/g, " ");
+}
+
+function getPersonaSourceFileError(file: File | null) {
+  if (!file) {
+    return null;
+  }
+
+  const fileName = file.name.toLowerCase();
+
+  if (fileName.endsWith(".zip")) {
+    return "Extract your WhatsApp export first, then upload the .txt chat file.";
+  }
+
+  if (!fileName.endsWith(".txt")) {
+    return "Upload a .txt file.";
+  }
+
+  return null;
 }
 
 function FidelityModeCards({
@@ -4904,11 +5055,35 @@ function personaToDraft(persona: PersonaOption): PersonaData {
 
 async function readJsonError(response: Response) {
   try {
-    const data = (await response.json()) as { error?: string };
-    return data.error;
+    const data = (await response.json()) as { error?: string; message?: string };
+    return data.error ?? data.message ?? null;
   } catch {
     return null;
   }
+}
+
+async function readPersonaGenerateResponse(response: Response) {
+  if (!response.ok) {
+    throw new Error((await readJsonError(response)) ?? "Could not generate persona.");
+  }
+
+  let data: {
+    meta?: GenerationMeta;
+    persona?: PersonaData;
+    sourceMemory?: SourceMemoryPayload;
+  };
+
+  try {
+    data = (await response.json()) as typeof data;
+  } catch {
+    throw new Error("Could not read persona generation response.");
+  }
+
+  if (!data.persona) {
+    throw new Error("Could not generate persona.");
+  }
+
+  return data;
 }
 
 function parseMessageParts(content: string): MessagePart[] {

@@ -336,13 +336,16 @@ function chunkWhatsappSource(sourceText: string): SourceMemoryChunkInput[] {
 function parseWhatsappMessages(sourceText: string): ParsedChatMessage[] {
   const messages: ParsedChatMessage[] = [];
   const lines = sourceText.split(/\r?\n/);
+  const date = String.raw`\d{1,2}[/-]\d{1,2}[/-]\d{2,4}`;
+  const time = String.raw`\d{1,2}:\d{2}(?::\d{2})?(?:[\s\u00a0\u202f]*[AP]M)?`;
   const plainPattern =
-    /^(\d{1,2}[/-]\d{1,2}[/-]\d{2,4},?\s+\d{1,2}:\d{2}(?:\s?[AP]M)?)\s+-\s+([^:]+):\s*(.*)$/i;
+    new RegExp(String.raw`^(${date},?[\s\u00a0\u202f]+${time})[\s\u00a0\u202f]+-[\s\u00a0\u202f]+([^:]+):[\s\u00a0\u202f]*(.*)$`, "i");
   const bracketPattern =
-    /^\[?(\d{1,2}[/-]\d{1,2}[/-]\d{2,4},?\s+\d{1,2}:\d{2}(?::\d{2})?(?:\s?[AP]M)?)\]?\s+([^:]+):\s*(.*)$/i;
+    new RegExp(String.raw`^\[?(${date},?[\s\u00a0\u202f]+${time})\]?[\s\u00a0\u202f]+([^:]+):[\s\u00a0\u202f]*(.*)$`, "i");
 
   for (const line of lines) {
-    const match = line.match(plainPattern) ?? line.match(bracketPattern);
+    const normalizedLine = normalizeWhatsappLine(line);
+    const match = normalizedLine.match(plainPattern) ?? normalizedLine.match(bracketPattern);
 
     if (match) {
       const text = cleanMessageText(match[3] ?? "");
@@ -382,6 +385,12 @@ function cleanMessageText(text: string) {
   }
 
   return cleaned;
+}
+
+function normalizeWhatsappLine(line: string) {
+  return line
+    .replace(/[\u200e\u200f]/g, "")
+    .replace(/[\u00a0\u202f]/g, " ");
 }
 
 function chatMessagesToChunk(index: number, messages: ParsedChatMessage[]): SourceMemoryChunkInput {

@@ -23,18 +23,25 @@ export async function POST(req: Request) {
 
   try {
     body = await parseRequestBody(req);
-  } catch {
-    return Response.json({ error: "Invalid request body." }, { status: 400 });
-  }
-
-  const payload = parseGenerateRequest(body);
-
-  if (!payload) {
+  } catch (error) {
     return Response.json(
-      { error: "name, sourceType, and sourceText are required." },
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Invalid request body.",
+      },
       { status: 400 },
     );
   }
+
+  const parsed = parseGenerateRequest(body);
+
+  if (!parsed.ok) {
+    return Response.json({ error: parsed.error }, { status: 400 });
+  }
+
+  const payload = parsed.payload;
 
   try {
     const result =
@@ -67,6 +74,7 @@ async function parseRequestBody(req: Request) {
     const form = await req.formData();
     const file = form.get("file");
     const pastedText = form.get("sourceText");
+    const sourceType = form.get("sourceType");
     const sourceText =
       file instanceof File
         ? await readTextFile(file)
@@ -79,7 +87,7 @@ async function parseRequestBody(req: Request) {
       generationMode: form.get("generationMode"),
       model: form.get("model"),
       name: form.get("name"),
-      sourceType: form.get("sourceType"),
+      sourceType,
       sourceText,
       targetSpeaker: form.get("targetSpeaker"),
       userSpeaker: form.get("userSpeaker"),
@@ -90,12 +98,14 @@ async function parseRequestBody(req: Request) {
 }
 
 async function readTextFile(file: File) {
-  if (!file.name.toLowerCase().endsWith(".txt")) {
-    throw new Error("Only .txt files are supported.");
+  const fileName = file.name.toLowerCase();
+
+  if (fileName.endsWith(".zip")) {
+    throw new Error("WhatsApp exports must be extracted first. Upload the .txt chat file, not the .zip.");
   }
 
-  if (file.size > 2 * 1024 * 1024) {
-    throw new Error("File is too large.");
+  if (!fileName.endsWith(".txt")) {
+    throw new Error("Only .txt files are supported.");
   }
 
   return file.text();
@@ -103,28 +113,44 @@ async function readTextFile(file: File) {
 
 function parseGenerateRequest(body: unknown) {
   if (typeof body !== "object" || body === null) {
-    return null;
+    return { error: "Invalid request body.", ok: false } as const;
   }
 
   const payload = body as Record<string, unknown>;
 
-  if (
-    typeof payload.name !== "string" ||
-    typeof payload.sourceType !== "string" ||
-    typeof payload.sourceText !== "string" ||
-    payload.name.trim().length < 2 ||
-    payload.sourceText.trim().length < 200
-  ) {
-    return null;
+  if (typeof payload.name !== "string" || payload.name.trim().length < 2) {
+    return { error: "Persona name must be at least 2 characters.", ok: false } as const;
   }
 
-  if (!isSourceType(payload.sourceType)) {
-    return null;
+  if (typeof payload.sourceType !== "string" || !isSourceType(payload.sourceType)) {
+    return { error: "Choose a valid source type.", ok: false } as const;
+  }
+
+  if (typeof payload.sourceText !== "string" || payload.sourceText.trim().length === 0) {
+    return { error: "Upload a .txt file or paste WhatsApp chat text.", ok: false } as const;
+  }
+
+  if (payload.sourceText.trim().length < 200) {
+    return { error: "Source text must be at least 200 characters.", ok: false } as const;
   }
 
   const trimmedSource = payload.sourceText.trim();
+  const targetSpeaker =
+    typeof payload.targetSpeaker === "string"
+      ? payload.targetSpeaker.trim() || undefined
+      : undefined;
+  const userSpeaker =
+    typeof payload.userSpeaker === "string"
+      ? payload.userSpeaker.trim() || undefined
+      : undefined;
+
+  if (payload.sourceType === "whatsapp-chat" && !targetSpeaker) {
+    return { error: "Choose the WhatsApp speaker to copy.", ok: false } as const;
+  }
 
   return {
+    ok: true,
+    payload: {
     apiKey: typeof payload.apiKey === "string" ? payload.apiKey.trim() || undefined : undefined,
     generationMode: parseGenerationMode(payload.generationMode),
     model: typeof payload.model === "string" ? payload.model.trim() || undefined : undefined,
@@ -133,14 +159,9 @@ function parseGenerateRequest(body: unknown) {
     sourceChars: trimmedSource.length,
     sourceText: trimmedSource.slice(0, MAX_SOURCE_CHARS),
     sourceTruncated: trimmedSource.length > MAX_SOURCE_CHARS,
-    targetSpeaker:
-      typeof payload.targetSpeaker === "string"
-        ? payload.targetSpeaker.trim() || undefined
-        : undefined,
-    userSpeaker:
-      typeof payload.userSpeaker === "string"
-        ? payload.userSpeaker.trim() || undefined
-        : undefined,
+    targetSpeaker,
+    userSpeaker,
+    },
   };
 }
 
@@ -235,6 +256,7 @@ type GeneratePayload = {
 function buildCompactGenerationPrompt(payload: GeneratePayload) {
   return `
 Extract a compact chat persona from this ${payload.sourceType}.
+${buildSpeakerScopeInstruction(payload)}
 
 Return only valid JSON matching this shape:
 ${personaJsonShape(payload.name)}
@@ -255,6 +277,7 @@ ${payload.sourceText}
 function buildDetailedGenerationPrompt(payload: GeneratePayload) {
   return `
 Extract a detailed behavioral simulation profile from this ${payload.sourceType}.
+${buildSpeakerScopeInstruction(payload)}
 
 The goal is not a summary. Capture how ${payload.name} speaks, reasons, teaches, reacts, corrects, encourages, jokes, transitions, and chooses words so another model can respond as if the user is talking to this person.
 
@@ -285,6 +308,7 @@ function buildChunkAnalysisPrompt(
 ) {
   return `
 Analyze chunk ${index} of ${total} for a high-fidelity persona profile of ${payload.name}.
+${buildSpeakerScopeInstruction(payload)}
 
 Return only valid JSON with:
 {
@@ -319,6 +343,7 @@ ${chunk}
 function buildHighFidelityMergePrompt(payload: GeneratePayload, analyses: string[]) {
   return `
 Merge these chunk analyses into one canonical high-fidelity persona for ${payload.name}.
+${buildSpeakerScopeInstruction(payload)}
 
 Return only valid JSON matching this shape:
 ${personaJsonShape(payload.name)}
@@ -334,6 +359,24 @@ Requirements:
 
 Chunk analyses:
 ${analyses.map((analysis, index) => `Analysis ${index + 1}:\n${analysis}`).join("\n\n")}
+`.trim();
+}
+
+function buildSpeakerScopeInstruction(payload: GeneratePayload) {
+  if (payload.sourceType !== "whatsapp-chat" || !payload.targetSpeaker) {
+    return "";
+  }
+
+  const otherSpeakerInstruction = payload.userSpeaker
+    ? ` Treat ${payload.userSpeaker}'s messages as conversation context only.`
+    : " Treat every other speaker's messages as conversation context only.";
+
+  return `
+Speaker scope:
+- Imitate only messages written by "${payload.targetSpeaker}".
+- Do not copy tone, vocabulary, catchphrases, emotional stance, or texting habits from any other participant.
+- Use other participants only to understand what "${payload.targetSpeaker}" is replying to.${otherSpeakerInstruction}
+- If a style trait appears only in another speaker's messages, exclude it from the persona.
 `.trim();
 }
 
